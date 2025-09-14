@@ -4,7 +4,7 @@ Main Streamlit Application for Portfolio Management System.
 This is the entry point for the web interface implementing the design
 specification with TradingView-inspired styling and comprehensive functionality.
 """
-
+from typing import Dict, List, Any, Optional, Tuple
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -602,6 +602,12 @@ def create_portfolio_from_text(
                 initial_value=initial_value
             )
 
+            # Calculate shares for each asset based on initial_value
+            for asset in portfolio.assets:
+                if asset.current_price and asset.current_price > 0:
+                    allocation = asset.weight * initial_value
+                    asset.shares = int(allocation / asset.current_price)  # Округляем вниз
+
             # Fetch company information if requested
             if fetch_info:
                 update_company_info(portfolio)
@@ -616,6 +622,25 @@ def create_portfolio_from_text(
 
             # Show portfolio summary
             display_portfolio_summary(portfolio)
+
+        # Calculate shares and set current prices for each asset
+        with st.spinner("Fetching prices and calculating shares..."):
+            tickers = [asset.ticker for asset in portfolio.assets]
+            prices = st.session_state.price_manager.get_current_prices(tickers)
+
+            for asset in portfolio.assets:
+                if asset.ticker in prices and prices[asset.ticker]:
+                    asset.current_price = prices[asset.ticker]
+                    allocation = asset.weight * initial_value
+                    asset.shares = int(allocation / asset.current_price)
+
+        # Calculate shares for each asset
+        for asset in portfolio.assets:
+            if hasattr(asset, 'current_price') and asset.current_price and asset.current_price > 0:
+                allocation = asset.weight * initial_value
+                asset.shares = int(allocation / asset.current_price)
+            else:
+                asset.shares = 0
 
     except Exception as e:
         st.error(f"Error creating portfolio: {str(e)}")
@@ -775,7 +800,7 @@ def import_portfolio_from_file(
 
 
 def render_manual_creation():
-    """Manual portfolio creation interface"""
+    """Manual portfolio creation interface with autocomplete and auto price fetch"""
 
     st.subheader("✋ Manual Entry")
 
@@ -799,14 +824,46 @@ def render_manual_creation():
 
     manual_description = st.text_area("Description", key="manual_description")
 
+    # Portfolio value setting
+    st.subheader("Portfolio Value")
+    initial_value = st.number_input(
+        "Total Portfolio Value ($)",
+        min_value=0.0,
+        value=100000.0,
+        step=1000.0,
+        format="%.2f",
+        help="Enter the total value you want to invest in this portfolio"
+    )
+
     # Asset entry section
     st.subheader("Add Assets")
 
     with st.form("add_asset_form"):
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
-            new_ticker = st.text_input("Ticker *", placeholder="AAPL")
+            new_ticker = st.text_input(
+                "Ticker Symbol *",
+                placeholder="Enter ticker",
+                key="ticker_input"
+            ).upper()
+
+            # Live price preview
+            if new_ticker and len(new_ticker) >= 2:
+                # Check if it's a valid ticker format
+                import re
+                if re.match(r'^[A-Z]{1,5}(-[A-Z])?$', new_ticker):
+                    try:
+                        preview_price = st.session_state.price_manager.get_current_price(new_ticker)
+                        if preview_price:
+                            st.success(f"✅ {new_ticker}: ${preview_price:.2f}")
+                        else:
+                            st.warning(f"⚠️ {new_ticker}: Price not found")
+                    except:
+                        st.info(f"🔍 {new_ticker}: Checking...")
+                else:
+                    if len(new_ticker) > 0:
+                        st.info("💡 Enter a valid ticker symbol")
 
         with col2:
             new_weight = st.number_input(
@@ -814,7 +871,8 @@ def render_manual_creation():
                 min_value=0.0,
                 max_value=100.0,
                 step=0.1,
-                format="%.2f"
+                format="%.2f",
+                help="Percentage allocation for this asset"
             )
 
         with col3:
@@ -822,52 +880,78 @@ def render_manual_creation():
                 "Shares (Optional)",
                 min_value=0.0,
                 step=0.001,
-                format="%.3f"
+                format="%.3f",
+                help="Number of shares you want to buy"
             )
 
-        with col4:
-            new_price = st.number_input(
-                "Price (Optional)",
-                min_value=0.0,
-                step=0.01,
-                format="%.2f"
-            )
-
+        # Add asset button with price fetching
         if st.form_submit_button("➕ Add Asset"):
-            add_manual_asset(new_ticker, new_weight, new_shares, new_price)
+            if new_ticker and new_weight > 0:
+                add_manual_asset_with_price_fetch(new_ticker, new_weight, new_shares, initial_value)
+            else:
+                st.error("Please enter both ticker symbol and weight")
 
     # Display current assets
     if st.session_state.manual_assets:
         st.subheader("📋 Current Assets")
 
-        # Create DataFrame for display
+        # Create DataFrame for display with calculated values
         manual_df_data = []
         total_weight = 0.0
 
         for i, asset_data in enumerate(st.session_state.manual_assets):
+            # Calculate dollar allocation
+            dollar_allocation = (asset_data['weight'] / 100) * initial_value
+
             manual_df_data.append({
                 'Index': i,
                 'Ticker': asset_data['ticker'],
                 'Weight %': f"{asset_data['weight']:.2f}%",
-                'Shares': asset_data.get('shares', 0),
-                'Price': f"${asset_data.get('price', 0):.2f}" if asset_data.get('price') else "N/A"
+                'Current Price': f"${asset_data.get('current_price', 0):.2f}" if asset_data.get(
+                    'current_price') else "Fetching...",
+                'Dollar Allocation': f"${dollar_allocation:,.2f}",
+                'Estimated Shares': f"{int(dollar_allocation / asset_data.get('current_price', 1))}" if asset_data.get(
+                    'current_price') else "TBD",
+                'Cash Remainder': f"${(dollar_allocation % asset_data.get('current_price', 1)):.2f}" if asset_data.get(
+                    'current_price') else "TBD",
+                'Manual Shares': f"{asset_data.get('shares', 0):.0f}" if asset_data.get('shares') else "-"
             })
             total_weight += asset_data['weight']
 
         manual_df = pd.DataFrame(manual_df_data)
         st.dataframe(manual_df, use_container_width=True, hide_index=True)
 
-        # Weight summary
+        # Weight and value summary
         col1, col2, col3 = st.columns(3)
 
         with col1:
-            weight_color = "positive" if abs(total_weight - 100.0) < 0.1 else "negative"
-            st.markdown(f"**Total Weight:** <span class='{weight_color}'>{total_weight:.2f}%</span>",
-                        unsafe_allow_html=True)
+            weight_color = "🟢" if abs(total_weight - 100.0) < 0.1 else "🔴"
+            st.markdown(f"**Total Weight:** {weight_color} {total_weight:.2f}%")
 
         with col2:
+
+            total_invested = sum(
+                int((asset_data['weight'] / 100) * initial_value / asset_data.get('current_price', 1)) * asset_data.get('current_price', 0)
+                for asset_data in st.session_state.manual_assets
+                if asset_data.get('current_price')
+            )
+            st.markdown(f"**Invested:** ${total_invested:,.2f}")
+
+        with col3:
+            remaining_cash = initial_value - total_invested
+            st.markdown(f"**Remaining Cash:** ${remaining_cash:,.2f}")
+
+        # Management buttons
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
             if st.button("⚖️ Normalize Weights"):
                 normalize_manual_weights()
+                st.rerun()
+
+        with col2:
+            if st.button("💰 Update Prices"):
+                update_manual_asset_prices()
                 st.rerun()
 
         with col3:
@@ -875,15 +959,14 @@ def render_manual_creation():
                 st.session_state.manual_assets = []
                 st.rerun()
 
-        # Asset management
+        # Asset removal
         if manual_df_data:
             st.subheader("🔧 Manage Assets")
-
             remove_index = st.selectbox(
                 "Remove Asset",
                 options=[-1] + list(range(len(st.session_state.manual_assets))),
                 format_func=lambda x: "Select asset to remove" if x == -1 else
-                f"{st.session_state.manual_assets[x]['ticker']}"
+                f"{st.session_state.manual_assets[x]['ticker']} ({st.session_state.manual_assets[x]['weight']:.1f}%)"
             )
 
             if remove_index >= 0:
@@ -893,8 +976,19 @@ def render_manual_creation():
 
         # Create portfolio button
         if manual_df_data and manual_name:
+            st.subheader("🚀 Create Portfolio")
+
+            # Validation warnings
+            if abs(total_weight - 100.0) > 0.1:
+                st.warning(f"⚠️ Total weight is {total_weight:.2f}%, not 100%. Consider normalizing weights.")
+
+            # Check for missing prices
+            missing_prices = [asset for asset in st.session_state.manual_assets if not asset.get('current_price')]
+            if missing_prices:
+                st.warning(f"⚠️ Missing prices for: {', '.join([a['ticker'] for a in missing_prices])}")
+
             if st.button("🚀 Create Portfolio", type="primary", use_container_width=True):
-                create_manual_portfolio(manual_name, manual_description, manual_type)
+                create_manual_portfolio(manual_name, manual_description, manual_type, initial_value)
 
 
 def add_manual_asset(ticker: str, weight_percent: float, shares: float, price: float):
@@ -943,7 +1037,7 @@ def normalize_manual_weights():
         st.success("✅ Weights normalized to 100%")
 
 
-def create_manual_portfolio(name: str, description: str, portfolio_type: str):
+def create_manual_portfolio(name: str, description: str, portfolio_type: str, initial_value: float):
     """Create portfolio from manual asset list"""
 
     try:
@@ -982,6 +1076,96 @@ def create_manual_portfolio(name: str, description: str, portfolio_type: str):
     except Exception as e:
         st.error(f"Error creating portfolio: {e}")
 
+
+def add_manual_asset_with_price_fetch(ticker: str, weight_percent: float, shares: float, portfolio_value: float):
+    """Add asset to manual creation list with automatic price fetching"""
+
+    if not ticker:
+        st.error("Ticker is required")
+        return
+
+    ticker = ticker.upper().strip()
+
+    # Check for duplicates
+    if any(asset['ticker'] == ticker for asset in st.session_state.manual_assets):
+        st.error(f"Asset {ticker} already exists")
+        return
+
+    # Validate ticker format
+    from core.data_manager.validators import TickerValidator
+    if not TickerValidator.validate_ticker(ticker):
+        st.error(f"Invalid ticker format: {ticker}")
+        return
+
+    # Fetch current price
+    current_price = None
+    try:
+        with st.spinner(f"Fetching price for {ticker}..."):
+            current_price = st.session_state.price_manager.get_current_price(ticker)
+
+        if current_price is None:
+            st.warning(f"Could not fetch price for {ticker}. You can add it anyway and update prices later.")
+        else:
+            st.success(f"✅ Fetched {ticker}: ${current_price:.2f}")
+
+    except Exception as e:
+        st.warning(f"Error fetching price for {ticker}: {e}")
+
+    # Add to list
+    asset_data = {
+        'ticker': ticker,
+        'weight': weight_percent,
+        'shares': shares if shares > 0 else None,
+        'current_price': current_price
+    }
+
+    st.session_state.manual_assets.append(asset_data)
+    st.success(f"✅ Added {ticker} ({weight_percent:.1f}%)")
+
+
+def update_manual_asset_prices():
+    """Update prices for all manual assets"""
+    if not st.session_state.manual_assets:
+        return
+
+    tickers = [asset['ticker'] for asset in st.session_state.manual_assets]
+
+    try:
+        with st.spinner("Updating prices..."):
+            prices = st.session_state.price_manager.get_current_prices(tickers)
+
+        updated_count = 0
+        for asset in st.session_state.manual_assets:
+            ticker = asset['ticker']
+            if ticker in prices and prices[ticker]:
+                asset['current_price'] = prices[ticker]
+                updated_count += 1
+
+        if updated_count > 0:
+            st.success(f"✅ Updated {updated_count} prices")
+        else:
+            st.warning("No prices were updated")
+
+    except Exception as e:
+        st.error(f"Error updating prices: {e}")
+
+
+def update_portfolio_prices(portfolio: Portfolio):
+    """Update prices for specific portfolio"""
+
+    with st.spinner(f"Updating prices for {portfolio.name}..."):
+        try:
+            updated_portfolio = st.session_state.price_manager.update_portfolio_prices(portfolio)
+            st.session_state.last_price_update = datetime.now()
+            st.success("✅ Prices updated successfully!")
+
+            # Show price update summary
+            prices_found = sum(1 for asset in updated_portfolio.assets if asset.current_price)
+            total_assets = len(updated_portfolio.assets)
+            st.info(f"📊 Updated {prices_found}/{total_assets} asset prices")
+
+        except Exception as e:
+            st.error(f"Error updating prices: {e}")
 
 def render_template_creation():
     """Template-based portfolio creation"""
@@ -1149,6 +1333,37 @@ def create_template_portfolio(
 
             st.success(f"✅ Portfolio '{name}' created from template!")
             display_portfolio_summary(portfolio)
+
+        # Calculate shares and fetch prices
+        with st.spinner("Fetching prices and calculating shares..."):
+            tickers = [asset.ticker for asset in portfolio.assets]
+            prices = st.session_state.price_manager.get_current_prices(tickers)
+
+            for asset in portfolio.assets:
+                if asset.ticker in prices and prices[asset.ticker]:
+                    asset.current_price = prices[asset.ticker]
+                    allocation = asset.weight * initial_value
+                    asset.shares = int(allocation / asset.current_price)
+
+        # Calculate shares for each asset
+        for asset in portfolio.assets:
+            if hasattr(asset, 'current_price') and asset.current_price and asset.current_price > 0:
+                allocation = asset.weight * initial_value
+                asset.shares = int(allocation / asset.current_price)
+            else:
+                asset.shares = 0
+
+        # Calculate shares based on prices and allocation
+        if fetch_prices:
+            with st.spinner("Calculating shares..."):
+                tickers = [asset.ticker for asset in portfolio.assets]
+                prices = st.session_state.price_manager.get_current_prices(tickers)
+
+                for asset in portfolio.assets:
+                    if asset.ticker in prices and prices[asset.ticker]:
+                        asset.current_price = prices[asset.ticker]
+                        allocation = asset.weight * initial_value
+                        asset.shares = int(allocation / asset.current_price)
 
     except Exception as e:
         st.error(f"Error creating template portfolio: {e}")
@@ -1589,8 +1804,14 @@ def display_portfolio_summary(portfolio: Portfolio):
 
     st.subheader("📊 Portfolio Summary")
 
-    # Basic stats
-    stats = portfolio.get_statistics()
+    # Calculate actual invested amount
+    total_invested = 0
+    for asset in portfolio.assets:
+        if asset.current_price and asset.shares:
+            total_invested += asset.shares * asset.current_price
+
+    # Calculate remaining cash
+    remaining_cash = portfolio.initial_value - total_invested
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -1603,14 +1824,17 @@ def display_portfolio_summary(portfolio: Portfolio):
     with col3:
         st.metric("Initial Value", format_currency(portfolio.initial_value))
 
-    with col4:
-        st.metric("Current Value", format_currency(stats.total_value))
+    # Calculate actual current value based on shares * current_price
+    current_value = sum(asset.shares * (asset.current_price or 0) for asset in portfolio.assets)
 
-    # Asset breakdown
+    with col4:
+        st.metric("Current Value", format_currency(current_value))
+
+    # Asset breakdown with shares
     if portfolio.assets:
         st.write("**Asset Breakdown:**")
         for asset in portfolio.assets:
-            col1, col2, col3 = st.columns([2, 1, 1])
+            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
             with col1:
                 st.write(f"• **{asset.ticker}** - {asset.name or 'Unknown'}")
             with col2:
@@ -1620,6 +1844,17 @@ def display_portfolio_summary(portfolio: Portfolio):
                     st.write(f"${asset.current_price:.2f}")
                 else:
                     st.write("Price N/A")
+            with col4:
+                if asset.shares > 0:
+                    st.write(f"{int(asset.shares)} shares")
+                else:
+                    st.write("0 shares")
+
+    # Show remaining cash
+    if remaining_cash > 0:
+        st.info(f"💰 Remaining cash: {format_currency(remaining_cash)}")
+    else:
+        st.success("✅ Fully invested")
 
 
 def update_all_prices():
@@ -1713,26 +1948,52 @@ def export_portfolio_data(portfolio: Optional[Portfolio] = None):
 def delete_portfolio_confirmation(portfolio: Portfolio):
     """Show delete confirmation dialog"""
 
-    st.error(f"⚠️ Are you sure you want to delete '{portfolio.name}'?")
-    st.write("This action cannot be undone.")
+    # Use session state to track confirmation
+    confirm_key = f"delete_confirm_{portfolio.id}"
 
-    col1, col2 = st.columns(2)
+    if confirm_key not in st.session_state:
+        st.session_state[confirm_key] = False
 
-    with col1:
-        if st.button("❌ Yes, Delete", type="secondary"):
-            try:
-                st.session_state.portfolio_manager.delete_portfolio(portfolio.id)
-                refresh_portfolios()
-                if st.session_state.selected_portfolio and st.session_state.selected_portfolio.id == portfolio.id:
-                    st.session_state.selected_portfolio = None
-                st.success(f"✅ Portfolio '{portfolio.name}' deleted")
+    if not st.session_state[confirm_key]:
+        st.error(f"⚠️ Are you sure you want to delete '{portfolio.name}'?")
+        st.write("This action cannot be undone.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("❌ Yes, Delete", key=f"confirm_delete_{portfolio.id}"):
+                st.session_state[confirm_key] = True
                 st.rerun()
-            except Exception as e:
-                st.error(f"Error deleting portfolio: {e}")
 
-    with col2:
-        if st.button("✅ Cancel"):
+        with col2:
+            if st.button("✅ Cancel", key=f"cancel_delete_{portfolio.id}"):
+                st.rerun()
+    else:
+        # Actually delete the portfolio
+        try:
+            import os
+            # Get portfolio file path and delete it directly
+            portfolio_file = f"data/portfolios/{portfolio.id}.json"
+            if os.path.exists(portfolio_file):
+                os.remove(portfolio_file)
+
+            # Also try portfolio manager delete
+            st.session_state.portfolio_manager.delete_portfolio(portfolio.id)
+
+            refresh_portfolios()
+            if st.session_state.selected_portfolio and st.session_state.selected_portfolio.id == portfolio.id:
+                st.session_state.selected_portfolio = None
+
+            # Clear confirmation state
+            del st.session_state[confirm_key]
+
+            st.success(f"✅ Portfolio '{portfolio.name}' deleted successfully!")
+            time.sleep(1)
             st.rerun()
+
+        except Exception as e:
+            st.error(f"Error deleting portfolio: {e}")
+            del st.session_state[confirm_key]
 
 
 # ================================
