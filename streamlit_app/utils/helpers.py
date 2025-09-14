@@ -564,5 +564,285 @@ def generate_sample_data() -> str:
         "SPY 40%, QQQ 30%, IWM 20%, EFA 10%"
     ]
 
+    def validate_ticker_input(text: str) -> tuple[bool, str, list]:
+        """
+        Validate and parse ticker input text.
+
+        Args:
+            text: Input text with ticker symbols and weights
+
+        Returns:
+            Tuple of (is_valid, error_message, parsed_tickers)
+        """
+
+        if not text or not text.strip():
+            return False, "No input provided", []
+
+        try:
+            from core.data_manager.validators import TextParser
+            parsed_data = TextParser.parse_text_input(text)
+
+            if not parsed_data:
+                return False, "Could not parse any valid ticker-weight pairs", []
+
+            # Convert to list of tuples for compatibility
+            parsed_tickers = [(item['ticker'], item['weight']) for item in parsed_data]
+
+            # Validate total weights
+            total_weight = sum(weight for _, weight in parsed_tickers)
+            if abs(total_weight - 1.0) > 0.001:
+                # This is a warning, not an error - weights can be normalized
+                pass
+
+            return True, "", parsed_tickers
+
+        except Exception as e:
+            return False, f"Error parsing input: {str(e)}", []
+
+    def validate_file_upload(uploaded_file) -> tuple[bool, str]:
+        """
+        Validate uploaded file for portfolio import.
+
+        Args:
+            uploaded_file: Streamlit uploaded file object
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+
+        if uploaded_file is None:
+            return False, "No file uploaded"
+
+        # Check file extension
+        allowed_extensions = ['.csv', '.xlsx', '.xls']
+        file_extension = '.' + uploaded_file.name.split('.')[-1].lower()
+
+        if file_extension not in allowed_extensions:
+            return False, f"Unsupported file type: {file_extension}. Allowed: {', '.join(allowed_extensions)}"
+
+        # Check file size (10MB limit)
+        max_size = 10 * 1024 * 1024  # 10MB
+        if uploaded_file.size > max_size:
+            return False, f"File too large: {uploaded_file.size / (1024 * 1024):.1f}MB. Maximum: 10MB"
+
+        return True, ""
+
+    def generate_sample_data(sample_type: str) -> str:
+        """
+        Generate sample data for portfolio creation.
+
+        Args:
+            sample_type: Type of sample ('tech', 'balanced', 'dividend', 'etf')
+
+        Returns:
+            Sample text string
+        """
+
+        samples = {
+            'tech': "AAPL 25%, MSFT 20%, GOOGL 15%, NVDA 15%, META 10%, AMZN 10%, TSLA 5%",
+            'balanced': "SPY 40%, BND 25%, VTI 20%, VTIAX 10%, GLD 5%",
+            'dividend': "JNJ 15%, PG 15%, KO 10%, PFE 10%, VZ 10%, T 10%, XOM 10%, CVX 10%, IBM 10%",
+            'etf': "SPY 30%, QQQ 25%, IWM 15%, EFA 15%, VEA 10%, BND 5%",
+            'conservative': "BND 40%, SPY 30%, VTI 15%, VTEB 10%, GLD 5%",
+            'growth': "QQQ 35%, SPY 25%, VUG 20%, ARKK 10%, VEA 10%"
+        }
+
+        return samples.get(sample_type, samples['balanced'])
+
+    def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
+        """
+        Safely divide two numbers, returning default if denominator is zero.
+
+        Args:
+            numerator: Number to divide
+            denominator: Number to divide by
+            default: Default value if division by zero
+
+        Returns:
+            Result of division or default value
+        """
+
+        if denominator == 0 or pd.isna(denominator):
+            return default
+
+        return numerator / denominator
+
+    def create_asset_table(assets: List[Asset]) -> pd.DataFrame:
+        """
+        Create a formatted DataFrame from list of assets.
+
+        Args:
+            assets: List of Asset objects
+
+        Returns:
+            Formatted pandas DataFrame
+        """
+
+        data = []
+        for asset in assets:
+            data.append({
+                'Ticker': asset.ticker,
+                'Name': asset.name or 'N/A',
+                'Weight': f"{asset.weight:.1%}",
+                'Shares': getattr(asset, 'shares', 0),
+                'Current Price': f"${getattr(asset, 'current_price', 0):.2f}" if hasattr(asset,
+                                                                                         'current_price') else 'N/A',
+                'Market Value': f"${asset.market_value:,.2f}" if hasattr(asset, 'market_value') else 'N/A',
+                'Sector': getattr(asset, 'sector', 'N/A')
+            })
+
+        return pd.DataFrame(data)
+
+    def format_currency_short(value: float) -> str:
+        """
+        Format currency value with K/M/B suffixes.
+
+        Args:
+            value: Currency value to format
+
+        Returns:
+            Formatted currency string
+        """
+
+        if pd.isna(value) or value is None:
+            return "$0"
+
+        if abs(value) >= 1_000_000_000:
+            return f"${value / 1_000_000_000:.2f}B"
+        elif abs(value) >= 1_000_000:
+            return f"${value / 1_000_000:.2f}M"
+        elif abs(value) >= 1_000:
+            return f"${value / 1_000:.1f}K"
+        else:
+            return f"${value:.2f}"
+
+    def calculate_portfolio_metrics(portfolio: Portfolio) -> dict:
+        """
+        Calculate comprehensive portfolio metrics.
+
+        Args:
+            portfolio: Portfolio object
+
+        Returns:
+            Dictionary with calculated metrics
+        """
+
+        metrics = {}
+
+        # Basic metrics
+        metrics['total_assets'] = len(portfolio.assets)
+        metrics['total_value'] = portfolio.calculate_value()
+        metrics['total_weight'] = sum(asset.weight for asset in portfolio.assets)
+
+        # Asset allocation metrics
+        if portfolio.assets:
+            weights = [asset.weight for asset in portfolio.assets]
+
+            # Concentration metrics
+            metrics['max_weight'] = max(weights)
+            metrics['min_weight'] = min(weights)
+            metrics['weight_std'] = pd.Series(weights).std()
+
+            # Top holdings
+            sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
+            metrics['top_5_weight'] = sum(asset.weight for asset in sorted_assets[:5])
+            metrics['top_10_weight'] = sum(asset.weight for asset in sorted_assets[:10])
+
+            # Sector diversification
+            sectors = {}
+            for asset in portfolio.assets:
+                sector = getattr(asset, 'sector', 'Unknown')
+                sectors[sector] = sectors.get(sector, 0) + asset.weight
+
+            metrics['sector_count'] = len(sectors)
+            metrics['largest_sector_weight'] = max(sectors.values()) if sectors else 0
+
+        # Value metrics (if prices available)
+        total_market_value = 0
+        assets_with_prices = 0
+
+        for asset in portfolio.assets:
+            if hasattr(asset, 'current_price') and asset.current_price:
+                assets_with_prices += 1
+                if hasattr(asset, 'shares') and asset.shares:
+                    total_market_value += asset.shares * asset.current_price
+
+        metrics['assets_with_prices'] = assets_with_prices
+        metrics['price_coverage'] = assets_with_prices / len(portfolio.assets) if portfolio.assets else 0
+        metrics['current_market_value'] = total_market_value
+
+        return metrics
+
+    def get_portfolio_health_score(portfolio: Portfolio) -> dict:
+        """
+        Calculate portfolio health score and recommendations.
+
+        Args:
+            portfolio: Portfolio object
+
+        Returns:
+            Dictionary with health score and recommendations
+        """
+
+        metrics = calculate_portfolio_metrics(portfolio)
+        health_score = 100  # Start with perfect score
+        recommendations = []
+
+        # Weight distribution check
+        if abs(metrics['total_weight'] - 1.0) > 0.01:
+            health_score -= 20
+            recommendations.append("Normalize portfolio weights to sum to 100%")
+
+        # Diversification check
+        if metrics['max_weight'] > 0.5:
+            health_score -= 15
+            recommendations.append("Reduce concentration - largest position exceeds 50%")
+        elif metrics['max_weight'] > 0.3:
+            health_score -= 5
+            recommendations.append("Consider reducing largest position (>30%)")
+
+        # Asset count check
+        if metrics['total_assets'] < 5:
+            health_score -= 10
+            recommendations.append("Consider adding more assets for better diversification")
+        elif metrics['total_assets'] > 50:
+            health_score -= 5
+            recommendations.append("Portfolio may be over-diversified - consider consolidating")
+
+        # Price data coverage
+        if metrics['price_coverage'] < 0.8:
+            health_score -= 10
+            recommendations.append("Update price data for better portfolio tracking")
+
+        # Sector diversification
+        if metrics['sector_count'] < 3:
+            health_score -= 10
+            recommendations.append("Add assets from different sectors for better diversification")
+
+        if metrics.get('largest_sector_weight', 0) > 0.6:
+            health_score -= 10
+            recommendations.append("Reduce sector concentration - largest sector exceeds 60%")
+
+        # Ensure score doesn't go below 0
+        health_score = max(0, health_score)
+
+        # Health rating
+        if health_score >= 90:
+            rating = "Excellent"
+        elif health_score >= 80:
+            rating = "Good"
+        elif health_score >= 70:
+            rating = "Fair"
+        elif health_score >= 60:
+            rating = "Poor"
+        else:
+            rating = "Critical"
+
+        return {
+            'score': health_score,
+            'rating': rating,
+            'recommendations': recommendations,
+            'metrics': metrics
+        }
     import random
     return random.choice(samples)

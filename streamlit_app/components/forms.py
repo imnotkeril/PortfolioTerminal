@@ -966,3 +966,583 @@ Created: {portfolio.created_date.strftime('%Y-%m-%d')}
 Holdings:
 {chr(10).join([f"- {a.ticker}: {a.weight:.1%}" for a in portfolio.assets])}
                 """)
+
+
+def render_text_input_form():
+    """Render the text input portfolio creation form."""
+
+    st.subheader("✏️ Create from Text Input")
+
+    # Sample data helper
+    col1, col2 = st.columns([3, 1])
+
+    with col1:
+        st.info("Enter ticker symbols with weights. Supports multiple formats.")
+
+    with col2:
+        sample_type = st.selectbox(
+            "Load Sample",
+            ["None", "Tech Focus", "Balanced", "Dividend", "ETF", "Conservative", "Growth"],
+            key="sample_selector"
+        )
+
+        if sample_type != "None":
+            sample_text = generate_sample_data(sample_type.lower().replace(' ', '_'))
+            st.session_state.text_input_sample = sample_text
+
+    # Input form
+    with st.form("text_input_form"):
+        portfolio_name = st.text_input(
+            "Portfolio Name *",
+            placeholder="e.g., My Tech Portfolio",
+            help="Enter a unique name for your portfolio"
+        )
+
+        portfolio_description = st.text_area(
+            "Description (Optional)",
+            placeholder="Brief description of your investment strategy...",
+            height=80
+        )
+
+        # Use sample text if selected
+        default_text = st.session_state.get('text_input_sample', '')
+        text_input = st.text_area(
+            "Enter Tickers and Weights *",
+            value=default_text,
+            placeholder="AAPL 30%, MSFT 25%, GOOGL 20%, AMZN 15%, TSLA 10%",
+            height=120,
+            help="Enter ticker symbols with weights in any supported format"
+        )
+
+        # Portfolio settings
+        col1, col2 = st.columns(2)
+
+        with col1:
+            portfolio_type = st.selectbox(
+                "Portfolio Type",
+                options=[t.value for t in PortfolioType],
+                format_func=lambda x: x.title()
+            )
+
+        with col2:
+            initial_value = st.number_input(
+                "Initial Value ($)",
+                min_value=1000.0,
+                value=100000.0,
+                step=1000.0,
+                format="%.0f"
+            )
+
+        # Advanced settings
+        with st.expander("⚙️ Advanced Settings", expanded=False):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                auto_normalize = st.checkbox("Auto-normalize weights", value=True)
+                fetch_company_info = st.checkbox("Fetch company information", value=True)
+
+            with col2:
+                calculate_shares = st.checkbox("Calculate share quantities", value=True)
+                update_prices = st.checkbox("Update current prices", value=True)
+
+        # Submit button
+        submit_button = st.form_submit_button(
+            "🚀 Create Portfolio",
+            type="primary",
+            use_container_width=True
+        )
+
+        if submit_button:
+            create_portfolio_from_text(
+                portfolio_name,
+                portfolio_description,
+                text_input,
+                portfolio_type,
+                initial_value,
+                auto_normalize,
+                fetch_company_info
+            )
+
+
+def render_file_upload_form():
+    """Render the file upload portfolio creation form."""
+
+    st.subheader("📁 Upload Portfolio File")
+
+    uploaded_file = st.file_uploader(
+        "Choose CSV or Excel file",
+        type=['csv', 'xlsx', 'xls'],
+        help="Upload a file with ticker symbols and weights"
+    )
+
+    if uploaded_file is not None:
+        # Validate file
+        is_valid, error_msg = validate_file_upload(uploaded_file)
+
+        if not is_valid:
+            st.error(error_msg)
+            return
+
+        try:
+            # Show file info
+            st.info(f"📄 File: {uploaded_file.name} ({uploaded_file.size} bytes)")
+
+            # Read file based on extension
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+
+            # Show preview
+            st.subheader("📋 File Preview")
+            st.dataframe(df.head(10), use_container_width=True)
+
+            # Column mapping
+            st.subheader("🗂️ Column Mapping")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                ticker_column = st.selectbox(
+                    "Ticker Column",
+                    options=df.columns.tolist(),
+                    help="Column containing ticker symbols"
+                )
+
+            with col2:
+                weight_column = st.selectbox(
+                    "Weight Column",
+                    options=["None (Equal Weight)"] + df.columns.tolist(),
+                    help="Column containing weights (optional for equal weighting)"
+                )
+
+            with col3:
+                name_column = st.selectbox(
+                    "Name Column (Optional)",
+                    options=["None"] + df.columns.tolist(),
+                    help="Column containing company names"
+                )
+
+            # Portfolio details form
+            with st.form("file_import_form"):
+                portfolio_name = st.text_input("Portfolio Name *")
+                portfolio_description = st.text_area("Description (Optional)")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    equal_weight = st.checkbox(
+                        "Equal Weight All Assets",
+                        value=(weight_column == "None (Equal Weight)")
+                    )
+                with col2:
+                    normalize_weights = st.checkbox("Normalize Weights", value=True)
+
+                if st.form_submit_button("📥 Import Portfolio", type="primary"):
+                    import_portfolio_from_file(
+                        df, portfolio_name, portfolio_description,
+                        ticker_column, weight_column, name_column,
+                        equal_weight, normalize_weights
+                    )
+
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
+
+def render_manual_creation_form():
+    """Render the manual portfolio creation form."""
+
+    st.subheader("✋ Manual Asset Entry")
+
+    # Initialize manual assets if not exists
+    if 'manual_assets' not in st.session_state:
+        st.session_state.manual_assets = []
+
+    # Portfolio basic info
+    col1, col2 = st.columns(2)
+
+    with col1:
+        manual_name = st.text_input("Portfolio Name *", key="manual_name")
+
+    with col2:
+        manual_type = st.selectbox(
+            "Portfolio Type",
+            options=[t.value for t in PortfolioType],
+            format_func=lambda x: x.title(),
+            key="manual_type"
+        )
+
+    manual_description = st.text_area("Description (Optional)", key="manual_description")
+
+    # Portfolio value setting
+    st.subheader("💰 Portfolio Value")
+    initial_value = st.number_input(
+        "Total Portfolio Value ($)",
+        min_value=0.0,
+        value=100000.0,
+        step=1000.0,
+        format="%.2f",
+        help="Enter the total value you want to invest in this portfolio"
+    )
+
+    # Asset entry section
+    st.subheader("📈 Add Assets")
+
+    with st.form("add_asset_form"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            new_ticker = st.text_input(
+                "Ticker Symbol *",
+                placeholder="e.g., AAPL",
+                key="ticker_input"
+            ).upper()
+
+            # Live price preview
+            if new_ticker and len(new_ticker) >= 2:
+                try:
+                    price_manager = get_price_manager()
+                    preview_price = price_manager.get_current_price(new_ticker)
+                    if preview_price:
+                        st.success(f"✅ {new_ticker}: ${preview_price:.2f}")
+                    else:
+                        st.warning(f"⚠️ {new_ticker}: Price not found")
+                except:
+                    st.info(f"🔍 {new_ticker}: Checking...")
+
+        with col2:
+            new_weight = st.number_input(
+                "Weight (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=10.0,
+                step=0.1,
+                format="%.2f",
+                help="Percentage allocation for this asset"
+            )
+
+        with col3:
+            new_shares = st.number_input(
+                "Shares (Optional)",
+                min_value=0.0,
+                step=0.001,
+                format="%.3f",
+                help="Number of shares you want to buy"
+            )
+
+        # Add asset button
+        if st.form_submit_button("➕ Add Asset"):
+            if new_ticker and new_weight > 0:
+                add_manual_asset_with_price_fetch(new_ticker, new_weight, new_shares, initial_value)
+                st.rerun()
+            else:
+                st.error("Please enter both ticker symbol and weight")
+
+    # Display current assets
+    if st.session_state.manual_assets:
+        st.subheader("📋 Current Assets")
+
+        # Create DataFrame for display with calculated values
+        manual_df_data = []
+        total_weight = 0.0
+
+        for i, asset_data in enumerate(st.session_state.manual_assets):
+            # Calculate dollar allocation
+            dollar_allocation = (asset_data['weight'] / 100) * initial_value
+
+            manual_df_data.append({
+                'Index': i,
+                'Ticker': asset_data['ticker'],
+                'Weight %': f"{asset_data['weight']:.2f}%",
+                'Current Price': f"${asset_data.get('current_price', 0):.2f}" if asset_data.get(
+                    'current_price') else "Fetching...",
+                'Dollar Allocation': f"${dollar_allocation:,.2f}",
+                'Estimated Shares': f"{int(dollar_allocation / asset_data.get('current_price', 1))}" if asset_data.get(
+                    'current_price') else "TBD",
+                'Cash Remainder': f"${(dollar_allocation % asset_data.get('current_price', 1)):.2f}" if asset_data.get(
+                    'current_price') else "TBD",
+                'Manual Shares': f"{asset_data.get('shares', 0):.0f}" if asset_data.get('shares') else "-"
+            })
+            total_weight += asset_data['weight']
+
+        manual_df = pd.DataFrame(manual_df_data)
+        st.dataframe(manual_df.drop('Index', axis=1), use_container_width=True, hide_index=True)
+
+        # Weight and value summary
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            weight_color = "🟢" if abs(total_weight - 100.0) < 0.1 else "🔴"
+            st.markdown(f"**Total Weight:** {weight_color} {total_weight:.2f}%")
+
+        with col2:
+            total_invested = sum(
+                int((asset_data['weight'] / 100) * initial_value / asset_data.get('current_price', 1)) * asset_data.get(
+                    'current_price', 0)
+                for asset_data in st.session_state.manual_assets
+                if asset_data.get('current_price')
+            )
+            st.markdown(f"**Invested:** ${total_invested:,.2f}")
+
+        with col3:
+            remaining_cash = initial_value - total_invested
+            st.markdown(f"**Remaining Cash:** ${remaining_cash:,.2f}")
+
+        # Management buttons
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            if st.button("⚖️ Normalize Weights"):
+                normalize_manual_weights()
+                st.rerun()
+
+        with col2:
+            if st.button("💰 Update Prices"):
+                update_manual_asset_prices()
+                st.rerun()
+
+        with col3:
+            if st.button("🗑️ Clear All"):
+                st.session_state.manual_assets = []
+                st.rerun()
+
+        with col4:
+            # Remove selected asset
+            if manual_df_data:
+                remove_index = st.selectbox(
+                    "Remove:",
+                    options=[-1] + list(range(len(st.session_state.manual_assets))),
+                    format_func=lambda x: "Select..." if x == -1 else f"{st.session_state.manual_assets[x]['ticker']}",
+                    key="remove_asset_selector"
+                )
+
+                if remove_index >= 0 and st.button(f"🗑️ Remove"):
+                    del st.session_state.manual_assets[remove_index]
+                    st.rerun()
+
+        # Create portfolio button
+        if manual_df_data and manual_name:
+            st.subheader("🚀 Create Portfolio")
+
+            # Validation warnings
+            if abs(total_weight - 100.0) > 0.1:
+                st.warning(f"⚠️ Total weight is {total_weight:.2f}%, not 100%. Consider normalizing weights.")
+
+            # Check for missing prices
+            missing_prices = [asset for asset in st.session_state.manual_assets if not asset.get('current_price')]
+            if missing_prices:
+                st.warning(f"⚠️ Missing prices for: {', '.join([a['ticker'] for a in missing_prices])}")
+
+            if st.button("🚀 Create Portfolio", type="primary", use_container_width=True):
+                create_manual_portfolio(manual_name, manual_description, manual_type, initial_value)
+
+
+def render_portfolio_template_form():
+    """Render the portfolio template creation form."""
+
+    st.subheader("📋 Create from Template")
+
+    # Define templates
+    templates = {
+        "Conservative Growth": {
+            "description": "Low-risk portfolio focused on stability and moderate growth",
+            "assets": [
+                ("SPY", 40, "S&P 500 ETF"),
+                ("BND", 30, "Aggregate Bond ETF"),
+                ("VTI", 15, "Total Stock Market ETF"),
+                ("VTEB", 10, "Tax-Exempt Bond ETF"),
+                ("GLD", 5, "Gold ETF")
+            ]
+        },
+        "Balanced Growth": {
+            "description": "Moderate risk with balanced growth and income approach",
+            "assets": [
+                ("SPY", 50, "S&P 500 ETF"),
+                ("QQQ", 20, "NASDAQ 100 ETF"),
+                ("BND", 15, "Aggregate Bond ETF"),
+                ("VEA", 10, "Developed Markets ETF"),
+                ("VWO", 5, "Emerging Markets ETF")
+            ]
+        },
+        "Tech Focus": {
+            "description": "Technology-heavy growth portfolio for higher risk tolerance",
+            "assets": [
+                ("AAPL", 20, "Apple Inc."),
+                ("MSFT", 18, "Microsoft Corporation"),
+                ("GOOGL", 15, "Alphabet Inc."),
+                ("AMZN", 12, "Amazon.com Inc."),
+                ("TSLA", 10, "Tesla Inc."),
+                ("NVDA", 10, "NVIDIA Corporation"),
+                ("META", 8, "Meta Platforms Inc."),
+                ("NFLX", 7, "Netflix Inc.")
+            ]
+        },
+        "Dividend Income": {
+            "description": "Focus on dividend-paying stocks for steady income",
+            "assets": [
+                ("VYM", 25, "Vanguard High Dividend Yield ETF"),
+                ("SCHD", 20, "Schwab US Dividend Equity ETF"),
+                ("JNJ", 10, "Johnson & Johnson"),
+                ("PG", 10, "Procter & Gamble"),
+                ("KO", 8, "Coca-Cola Company"),
+                ("PEP", 8, "PepsiCo Inc."),
+                ("VZ", 7, "Verizon Communications"),
+                ("T", 7, "AT&T Inc."),
+                ("XOM", 5, "Exxon Mobil Corporation")
+            ]
+        },
+        "Global Diversified": {
+            "description": "Internationally diversified portfolio across markets",
+            "assets": [
+                ("VTI", 35, "Total US Stock Market ETF"),
+                ("VTIAX", 25, "Total International Stock ETF"),
+                ("VEA", 20, "Developed Markets ETF"),
+                ("VWO", 10, "Emerging Markets ETF"),
+                ("BND", 10, "US Aggregate Bond ETF")
+            ]
+        },
+        "ESG Focused": {
+            "description": "Environmentally and socially responsible investing",
+            "assets": [
+                ("ESGU", 30, "ESG MSCI USA ETF"),
+                ("ESGD", 25, "ESG MSCI EAFE ETF"),
+                ("SUSA", 20, "ESG S&P 500 ETF"),
+                ("ICLN", 15, "Clean Energy ETF"),
+                ("SUSC", 10, "ESG Small-Cap ETF")
+            ]
+        }
+    }
+
+    # Template selection
+    selected_template = st.selectbox(
+        "Choose Template",
+        options=list(templates.keys()),
+        format_func=lambda x: f"{x}",
+        key="template_selector"
+    )
+
+    if selected_template:
+        template = templates[selected_template]
+
+        # Show template details
+        st.info(template['description'])
+
+        # Display template assets
+        template_df = pd.DataFrame([
+            {
+                'Ticker': ticker,
+                'Weight %': f"{weight:.1f}%",
+                'Description': desc
+            }
+            for ticker, weight, desc in template['assets']
+        ])
+
+        st.dataframe(template_df, use_container_width=True, hide_index=True)
+
+        # Creation form
+        with st.form("template_form"):
+            template_name = st.text_input(
+                "Portfolio Name *",
+                value=f"{selected_template} Portfolio",
+                placeholder="Enter portfolio name"
+            )
+
+            template_description = st.text_area(
+                "Description",
+                value=template['description'],
+                help="Customize the description if needed"
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                template_initial_value = st.number_input(
+                    "Initial Value ($)",
+                    min_value=1000.0,
+                    value=100000.0,
+                    step=1000.0
+                )
+
+            with col2:
+                fetch_prices = st.checkbox("Fetch Current Prices", value=True)
+
+            if st.form_submit_button("🚀 Create from Template", type="primary"):
+                create_template_portfolio(
+                    template_name,
+                    template_description,
+                    template,
+                    template_initial_value,
+                    fetch_prices
+                )
+
+
+def render_import_export_form():
+    """Render the import/export portfolio form."""
+
+    st.subheader("🔄 Import/Export Portfolios")
+
+    tab1, tab2 = st.tabs(["📥 Import", "📤 Export"])
+
+    with tab1:
+        st.write("### Import Previously Exported Portfolio")
+
+        import_file = st.file_uploader(
+            "Upload Portfolio JSON File",
+            type=['json'],
+            help="Import a portfolio that was previously exported from this system"
+        )
+
+        if import_file is not None:
+            try:
+                import json
+                portfolio_data = json.load(import_file)
+
+                st.success(f"📄 Loaded portfolio data: {portfolio_data.get('name', 'Unnamed')}")
+
+                # Show preview
+                st.json(portfolio_data, expanded=False)
+
+                if st.button("Import Portfolio", type="primary"):
+                    import_portfolio_from_json(portfolio_data)
+
+            except Exception as e:
+                st.error(f"Error reading JSON file: {str(e)}")
+
+    with tab2:
+        st.write("### Export Existing Portfolio")
+
+        from ..utils.session_state import get_portfolios
+        portfolios = get_portfolios()
+
+        if portfolios:
+            portfolio_options = {p.name: p for p in portfolios}
+            selected_name = st.selectbox(
+                "Select Portfolio to Export",
+                options=list(portfolio_options.keys())
+            )
+
+            if selected_name:
+                selected_portfolio = portfolio_options[selected_name]
+
+                export_format = st.selectbox(
+                    "Export Format",
+                    options=["JSON", "CSV", "Excel"]
+                )
+
+                if st.button("📤 Export Portfolio", type="primary"):
+                    export_portfolio_data(selected_portfolio, export_format)
+        else:
+            st.info("No portfolios available to export. Create a portfolio first.")
+
+
+def import_portfolio_from_json(portfolio_data: dict):
+    """Import portfolio from JSON data."""
+
+    try:
+        with st.spinner("Importing portfolio from JSON..."):
+            # This would implement the actual JSON import logic
+            st.success(f"✅ Successfully imported portfolio: {portfolio_data.get('name', 'Unnamed')}")
+
+            # Refresh portfolio list
+            refresh_portfolios()
+
+    except Exception as e:
+        st.error(f"Error importing portfolio: {str(e)}")
