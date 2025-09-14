@@ -126,7 +126,8 @@ def render_recent_activity():
                 if st.button("View", key=f"view_recent_{portfolio.id}", use_container_width=True):
                     from ..utils.session_state import set_selected_portfolio
                     set_selected_portfolio(portfolio)
-                    st.session_state.main_navigation = "📊 Portfolio Analysis"
+                    st.query_params["page"] = "portfolio_analysis"
+                    st.query_params["portfolio_id"] = portfolio.id
                     st.rerun()
 
 

@@ -825,6 +825,60 @@ def render_chart_controls() -> Dict[str, Any]:
     }
 
 
+def create_portfolio_comparison_chart(portfolios: List[Portfolio]) -> go.Figure:
+    """
+    Create portfolio comparison chart showing values and allocation.
+
+    Args:
+        portfolios: List of Portfolio objects to compare
+
+    Returns:
+        Plotly figure object
+    """
+
+    if not portfolios:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No portfolios to compare",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5,
+            showarrow=False,
+            font=dict(size=16)
+        )
+        return fig
+
+    # Portfolio value comparison
+    portfolio_names = [p.name for p in portfolios]
+    portfolio_values = [p.calculate_value() for p in portfolios]
+
+    # Create bar chart for portfolio values
+    fig = go.Figure()
+
+    fig.add_trace(go.Bar(
+        x=portfolio_names,
+        y=portfolio_values,
+        text=[format_currency(val) for val in portfolio_values],
+        textposition='auto',
+        name='Portfolio Value',
+        marker_color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'][:len(portfolios)],
+        hovertemplate="<b>%{x}</b><br>" +
+                      "Value: %{y:$,.0f}<br>" +
+                      "<extra></extra>"
+    ))
+
+    fig.update_layout(
+        title="Portfolio Values Comparison",
+        xaxis_title="Portfolio",
+        yaxis_title="Value ($)",
+        height=400,
+        showlegend=False,
+        font=dict(family="Arial", size=10),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)"
+    )
+
+    return fig
+
 def apply_chart_styling(fig: go.Figure, theme: str = "default") -> go.Figure:
     """
     Apply consistent styling to charts.
