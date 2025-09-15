@@ -15,10 +15,9 @@ sys.path.append(str(current_dir))
 
 from ..components.forms import (
     render_text_input_form,
-    render_file_upload_form,
     render_manual_creation_form,
     render_portfolio_template_form,
-    render_import_export_form
+    render_file_operations_form
 )
 
 
@@ -30,32 +29,25 @@ def render_create_portfolio():
     # Introduction and help
     render_creation_help()
 
-    # Creation method tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+
+    tab1, tab2, tab3, tab4 = st.tabs([
         "✏️ Text Input",
-        "📁 File Upload",
+        "📁 File Operations",
         "✋ Manual Entry",
-        "📋 Templates",
-        "🔄 Import/Export"
+        "📋 Templates"
     ])
 
     with tab1:
         render_text_input_form()
 
     with tab2:
-        render_file_upload_form()
+        render_file_operations_form()
 
     with tab3:
         render_manual_creation_form()
 
     with tab4:
         render_portfolio_template_form()
-
-    with tab5:
-        render_import_export_form()
-
-    # Recent activity
-    render_recent_activity()
 
 
 def render_creation_help():
@@ -70,10 +62,11 @@ def render_creation_help():
         - Supports multiple formats: percentages, decimals, or equal weights
         - Perfect for quick portfolio creation
 
-        **📁 File Upload** - *Best for large portfolios*
-        - Upload CSV or Excel files with your holdings
-        - Map columns to ticker, weight, and name fields
-        - Ideal for importing from other platforms
+        **📁 File Operations** - *Upload files or import/export data*
+        - **Upload CSV/Excel**: Import portfolios from spreadsheet files
+        - **Import JSON**: Restore previously exported portfolios
+        - **Export Portfolio**: Backup existing portfolios in multiple formats
+        - Ideal for importing from other platforms or backup/restore
 
         **✋ Manual Entry** - *Most control and flexibility*
         - Add each asset individually with full details
@@ -85,11 +78,6 @@ def render_creation_help():
         - Conservative, Growth, Income, and ESG options
         - Customize templates to fit your needs
 
-        **🔄 Import/Export** - *For existing data*
-        - Import previously exported portfolios
-        - Transfer data between different instances
-        - Backup and restore portfolio configurations
-
         ### 💡 Tips for Success
         - Weights should sum to 100% (auto-normalization available)
         - Use standard ticker symbols (AAPL, MSFT, GOOGL, etc.)
@@ -97,38 +85,6 @@ def render_creation_help():
         - Initial investment amount is used for share calculations
         """)
 
-
-def render_recent_activity():
-    """Render recent portfolio creation activity."""
-
-    from ..utils.session_state import get_portfolios
-
-    portfolios = get_portfolios()
-
-    if not portfolios:
-        return
-
-    st.subheader("📈 Recent Activity")
-
-    # Sort portfolios by creation date (newest first)
-    recent_portfolios = sorted(portfolios, key=lambda p: p.created_date, reverse=True)[:5]
-
-    cols = st.columns(min(len(recent_portfolios), 5))
-
-    for i, portfolio in enumerate(recent_portfolios):
-        with cols[i]:
-            with st.container():
-                st.write(f"**{portfolio.name}**")
-                st.caption(f"Created: {portfolio.created_date.strftime('%m/%d/%Y')}")
-                st.caption(f"Assets: {len(portfolio.assets)}")
-                st.caption(f"Value: ${portfolio.calculate_value():,.0f}")
-
-                if st.button("View", key=f"view_recent_{portfolio.id}", use_container_width=True):
-                    from ..utils.session_state import set_selected_portfolio
-                    set_selected_portfolio(portfolio)
-                    st.query_params["page"] = "portfolio_analysis"
-                    st.query_params["portfolio_id"] = portfolio.id
-                    st.rerun()
 
 
 def render_creation_wizard():

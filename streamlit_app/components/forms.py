@@ -92,17 +92,6 @@ def render_text_input_form():
                 format="%.0f"
             )
 
-        # Advanced settings
-        with st.expander("⚙️ Advanced Settings", expanded=False):
-            col1, col2 = st.columns(2)
-
-            with col1:
-                auto_normalize = st.checkbox("Auto-normalize weights", value=True)
-                fetch_company_info = st.checkbox("Fetch company information", value=True)
-
-            with col2:
-                calculate_shares = st.checkbox("Calculate share quantities", value=True)
-                update_prices = st.checkbox("Update current prices", value=True)
 
         # Submit button
         submit_button = st.form_submit_button(
@@ -206,6 +195,193 @@ def render_file_upload_form():
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
+
+def render_file_operations_form():
+    """Render combined file upload and import/export form."""
+
+    st.subheader("📁 File Operations")
+
+    # Sub-tabs for different file operations
+    subtab1, subtab2, subtab3 = st.tabs([
+        "📤 Upload CSV/Excel",
+        "📥 Import JSON",
+        "📋 Export Portfolio"
+    ])
+
+    with subtab1:
+        render_csv_excel_upload()
+
+    with subtab2:
+        render_json_import()
+
+    with subtab3:
+        render_portfolio_export()
+
+
+def render_csv_excel_upload():
+    """Render CSV/Excel upload section."""
+
+    st.write("#### Upload Portfolio File")
+    st.info("Upload CSV or Excel files with your portfolio holdings")
+
+    uploaded_file = st.file_uploader(
+        "Choose CSV or Excel file",
+        type=['csv', 'xlsx', 'xls'],
+        help="Upload a file with ticker symbols and weights"
+    )
+
+    if uploaded_file is not None:
+        # Validate file
+        is_valid, error_msg = validate_file_upload(uploaded_file)
+
+        if not is_valid:
+            st.error(error_msg)
+            return
+
+        try:
+            # Show file info
+            st.info(f"📄 File: {uploaded_file.name} ({uploaded_file.size} bytes)")
+
+            # Read file based on extension
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+
+            # Show preview
+            st.write("##### File Preview")
+            st.dataframe(df.head(10), use_container_width=True)
+
+            # Column mapping
+            st.write("##### Column Mapping")
+
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                ticker_column = st.selectbox(
+                    "Ticker Column",
+                    options=df.columns.tolist(),
+                    help="Column containing ticker symbols"
+                )
+
+            with col2:
+                weight_column = st.selectbox(
+                    "Weight Column",
+                    options=["None (Equal Weight)"] + df.columns.tolist(),
+                    help="Column containing weights (optional for equal weighting)"
+                )
+
+            with col3:
+                name_column = st.selectbox(
+                    "Name Column (Optional)",
+                    options=["None"] + df.columns.tolist(),
+                    help="Column containing company names"
+                )
+
+            # Portfolio details form
+            with st.form("file_import_form"):
+                portfolio_name = st.text_input("Portfolio Name *")
+                portfolio_description = st.text_area("Description (Optional)")
+
+                # Portfolio settings
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    portfolio_type = st.selectbox(
+                        "Portfolio Type",
+                        options=[t.value for t in PortfolioType],
+                        format_func=lambda x: x.title()
+                    )
+
+                with col2:
+                    initial_value = st.number_input(
+                        "Initial Value ($)",
+                        min_value=1000.0,
+                        value=100000.0,
+                        step=1000.0,
+                        format="%.0f"
+                    )
+
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
+
+def render_json_import():
+    """Render JSON import section."""
+
+    st.write("#### Import Previously Exported Portfolio")
+    st.info("Upload JSON files previously exported from this system")
+
+    import_file = st.file_uploader(
+        "Upload Portfolio JSON File",
+        type=['json'],
+        help="Import a portfolio that was previously exported from this system"
+    )
+
+    if import_file is not None:
+        try:
+            portfolio_data = json.load(import_file)
+
+            st.success(f"📄 Loaded portfolio data: {portfolio_data.get('name', 'Unnamed')}")
+
+            # Show preview
+            with st.expander("Preview Portfolio Data", expanded=False):
+                st.json(portfolio_data)
+
+            if st.button("📥 Import Portfolio", type="primary", use_container_width=True):
+                import_portfolio_from_json(portfolio_data)
+
+        except Exception as e:
+            st.error(f"Error reading JSON file: {str(e)}")
+
+
+def render_portfolio_export():
+    """Render portfolio export section."""
+
+    st.write("#### Export Existing Portfolio")
+    st.info("Export your portfolios for backup or sharing")
+
+    from ..utils.session_state import get_portfolios
+    portfolios = get_portfolios()
+
+    if portfolios:
+        portfolio_options = {p.name: p for p in portfolios}
+        selected_name = st.selectbox(
+            "Select Portfolio to Export",
+            options=list(portfolio_options.keys()),
+            help="Choose which portfolio you want to export"
+        )
+
+        if selected_name:
+            selected_portfolio = portfolio_options[selected_name]
+
+            # Show portfolio summary
+            with st.expander("Portfolio Summary", expanded=True):
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.metric("Assets", len(selected_portfolio.assets))
+
+                with col2:
+                    st.metric("Type", selected_portfolio.portfolio_type.value.title())
+
+                with col3:
+                    st.metric("Created", selected_portfolio.created_date.strftime("%m/%d/%Y"))
+
+            export_format = st.selectbox(
+                "Export Format",
+                options=["JSON", "CSV", "Excel"],
+                help="Choose the format for your exported file"
+            )
+
+            if st.button("📤 Export Portfolio", type="primary", use_container_width=True):
+                export_portfolio_data(selected_portfolio, export_format)
+    else:
+        st.info("No portfolios available to export. Create a portfolio first.")
+
+        if st.button("➕ Create Portfolio", use_container_width=True):
+            st.query_params["tab"] = "text_input"
+            st.rerun()
 
 def render_manual_creation_form():
     """Render the manual portfolio creation form."""
