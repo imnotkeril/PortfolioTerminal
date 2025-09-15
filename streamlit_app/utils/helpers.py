@@ -161,23 +161,55 @@ def display_portfolio_summary(portfolio: Portfolio):
         sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
         top_assets = sorted_assets[:5]
 
+        # Подготавливаем данные для таблицы
+        table_data = []
         for asset in top_assets:
-            col1, col2, col3 = st.columns([3, 1, 1])
+            # Название компании
+            display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
 
-            with col1:
-                # Отображаем тикер, название и сектор
-                display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
-                sector_info = f" • {asset.sector}" if asset.sector and asset.sector != "Unknown" else ""
-                st.write(f"**{asset.ticker}** - {display_name}{sector_info}")
+            # Сектор
+            sector = asset.sector if asset.sector and asset.sector != "Unknown" else "N/A"
 
-            with col2:
-                st.write(f"{asset.weight:.1%}")
+            # Цена актива
+            current_price = asset.current_price if hasattr(asset, 'current_price') and asset.current_price else 0
 
-            with col3:
-                if hasattr(asset, 'current_price') and asset.current_price:
-                    st.write(f"${asset.current_price:.2f}")
-                else:
-                    st.write("N/A")
+            # Количество акций
+            shares = asset.shares if hasattr(asset, 'shares') and asset.shares else 0
+
+            # Общая сумма позиции
+            total_position_value = current_price * shares if current_price and shares else 0
+
+            # Если нет количества акций, рассчитываем через вес
+            if not total_position_value and asset.weight and portfolio.initial_value:
+                total_position_value = asset.weight * portfolio.initial_value
+
+            table_data.append({
+                'Ticker': asset.ticker,
+                'Company Name': display_name,
+                'Sector': sector,
+                'Weight': f"{asset.weight:.1%}",
+                'Price': f"${current_price:.2f}" if current_price else "N/A",
+                'Shares': f"{shares:,.0f}" if shares else "N/A",
+                'Total Value': f"${total_position_value:,.2f}" if total_position_value else "N/A"
+            })
+
+        # Создаем и отображаем таблицу
+        df = pd.DataFrame(table_data)
+
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Ticker": st.column_config.TextColumn("Ticker", width="small"),
+                "Company Name": st.column_config.TextColumn("Company Name", width="large"),
+                "Sector": st.column_config.TextColumn("Sector", width="medium"),
+                "Weight": st.column_config.TextColumn("Weight", width="small"),
+                "Price": st.column_config.TextColumn("Price", width="small"),
+                "Shares": st.column_config.TextColumn("Shares", width="small"),
+                "Total Value": st.column_config.TextColumn("Total Value", width="medium")
+            }
+        )
 
 
 def show_update_company_info_button(portfolio: Portfolio):
