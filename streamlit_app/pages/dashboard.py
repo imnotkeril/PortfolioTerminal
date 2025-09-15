@@ -4,6 +4,8 @@ Dashboard page for the Portfolio Management System.
 This module contains the main dashboard view showing portfolio overview and key metrics.
 """
 import streamlit as st
+import pandas as pd
+import numpy as np
 from typing import List, Optional
 import sys
 from pathlib import Path
@@ -20,8 +22,12 @@ from ..utils.session_state import (
 from ..utils.formatting import format_currency, format_percentage, format_datetime
 from ..utils.helpers import calculate_portfolio_metrics
 from ..components.tables import render_portfolio_overview_table
-
-
+from ..components.charts import (
+    create_portfolio_comparison_chart,
+    create_risk_return_scatter,
+    create_portfolio_allocation_chart,
+    create_portfolio_summary_cards
+)
 
 def render_dashboard():
     """Render the main dashboard page."""
