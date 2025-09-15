@@ -727,7 +727,7 @@ def create_efficient_frontier_chart(portfolio: Portfolio) -> go.Figure:
 
 def create_portfolio_summary_cards(portfolio: Portfolio) -> Dict[str, Any]:
     """
-    Create summary metrics cards for portfolio dashboard.
+    Create summary metrics cards for portfolio dashboard with improved metrics.
 
     Args:
         portfolio: Portfolio object
@@ -735,19 +735,47 @@ def create_portfolio_summary_cards(portfolio: Portfolio) -> Dict[str, Any]:
     Returns:
         Dictionary with metric values and formatting
     """
+    from ..utils.session_state import get_price_manager
 
     total_value = portfolio.calculate_value()
     total_assets = len(portfolio.assets)
 
-    # Calculate additional metrics (placeholder)
-    total_shares = sum(getattr(asset, 'shares', 0) for asset in portfolio.assets)
-    avg_price = safe_divide(total_value, total_shares) if total_shares > 0 else 0
+    # Auto-fetch company info for assets without sectors
+    price_manager = get_price_manager()
+    assets_to_update = [asset for asset in portfolio.assets if not asset.sector or not asset.name]
+
+    if assets_to_update:
+        for asset in assets_to_update:
+            try:
+                company_info = price_manager.get_company_info(asset.ticker)
+                if company_info:
+                    if not asset.name:
+                        asset.name = company_info.name
+                    if not asset.sector:
+                        asset.sector = company_info.sector or "Unknown"
+            except Exception:
+                # Set defaults if fetch fails
+                if not asset.name:
+                    asset.name = f"{asset.ticker} Corp"
+                if not asset.sector:
+                    asset.sector = "Unknown"
+
+    # Calculate remaining cash instead of daily return
+    invested_value = 0.0
+    for asset in portfolio.assets:
+        if asset.current_price and asset.shares:
+            invested_value += asset.current_price * asset.shares
+        elif asset.weight and portfolio.initial_value:
+            # Fallback to weight-based calculation
+            invested_value += asset.weight * portfolio.initial_value
+
+    remaining_cash = max(0, portfolio.initial_value - invested_value)
 
     # Portfolio concentration (weight of top 3 holdings)
     sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
     top_3_concentration = sum(asset.weight for asset in sorted_assets[:3])
 
-    # Placeholder performance metrics
+    # Placeholder performance metrics for other cards
     daily_change = np.random.uniform(-0.03, 0.03)
     daily_change_value = total_value * daily_change
 
@@ -772,10 +800,10 @@ def create_portfolio_summary_cards(portfolio: Portfolio) -> Dict[str, Any]:
             'delta': None,
             'delta_color': 'normal'
         },
-        'daily_return': {
-            'value': format_percentage(daily_change),
+        'remaining_cash': {  # Changed from daily_return to remaining_cash
+            'value': format_currency(remaining_cash),
             'delta': None,
-            'delta_color': 'normal' if daily_change >= 0 else 'inverse'
+            'delta_color': 'normal'
         }
     }
 

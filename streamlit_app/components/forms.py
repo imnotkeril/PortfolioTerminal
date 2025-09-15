@@ -92,6 +92,25 @@ def render_text_input_form():
                 format="%.0f"
             )
 
+        # Additional options
+        st.write("**Options**")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            auto_normalize = st.checkbox(
+                "Auto-normalize weights",
+                value=True,
+                help="Automatically adjust weights to sum to 100%",
+                key="text_input_auto_normalize"
+            )
+
+        with col2:
+            fetch_company_info = st.checkbox(
+                "Fetch company information",
+                value=True,
+                help="Automatically fetch company names and sector data",
+                key="text_input_fetch_info"
+            )
 
         # Submit button
         submit_button = st.form_submit_button(
@@ -383,6 +402,7 @@ def render_portfolio_export():
             st.query_params["tab"] = "text_input"
             st.rerun()
 
+
 def render_manual_creation_form():
     """Render the manual portfolio creation form."""
 
@@ -438,63 +458,83 @@ def render_manual_creation_form():
                     price_manager = get_price_manager()
                     preview_price = price_manager.get_current_price(new_ticker)
                     if preview_price:
-                        st.success(f"✅ {new_ticker}: ${preview_price:.2f}")
+                        st.success(f"💰 Current Price: ${preview_price:.2f}")
                     else:
-                        st.warning(f"⚠️ {new_ticker}: Price not found")
-                except:
-                    st.info(f"🔍 {new_ticker}: Checking...")
+                        st.warning("⚠️ Price not available")
+                except Exception as e:
+                    st.warning(f"⚠️ Error fetching price: {str(e)}")
 
         with col2:
             new_weight = st.number_input(
                 "Weight (%)",
-                min_value=0.0,
+                min_value=0.1,
                 max_value=100.0,
                 value=10.0,
                 step=0.1,
-                format="%.2f",
-                help="Percentage allocation for this asset"
+                key="weight_input"
             )
 
         with col3:
             new_shares = st.number_input(
                 "Shares (Optional)",
                 min_value=0.0,
-                step=0.001,
-                format="%.3f",
-                help="Number of shares you want to buy"
+                value=0.0,
+                step=1.0,
+                key="shares_input",
+                help="Leave 0 for automatic calculation"
             )
 
-        # Add asset button
-        if st.form_submit_button("➕ Add Asset"):
-            if new_ticker and new_weight > 0:
-                add_manual_asset_with_price_fetch(new_ticker, new_weight, new_shares, initial_value)
-                st.rerun()
-            else:
-                st.error("Please enter both ticker symbol and weight")
+        add_asset_button = st.form_submit_button("➕ Add Asset", use_container_width=True)
 
-    # Display current assets
+        if add_asset_button and new_ticker:
+            add_manual_asset_with_price_fetch(new_ticker, new_weight, new_shares, initial_value)
+            st.rerun()
+
+    # Display current assets if any
     if st.session_state.manual_assets:
-        st.subheader("📋 Current Assets")
+        st.subheader("📊 Current Assets")
 
-        # Create DataFrame for display with calculated values
+        # Build dataframe for display
         manual_df_data = []
-        total_weight = 0.0
+        total_weight = 0.0  # Initialize as float
+        total_invested = 0.0
 
         for i, asset_data in enumerate(st.session_state.manual_assets):
+            # Safely get weight and price with defaults
+            weight = asset_data.get('weight', 0.0) or 0.0
+            current_price = asset_data.get('current_price', 0.0) or 0.0
+            shares = asset_data.get('shares', 0.0) or 0.0
+
             # Calculate dollar allocation
-            dollar_allocation = (asset_data['weight'] / 100) * initial_value
+            dollar_allocation = (weight / 100) * initial_value
+
+            # Calculate estimated shares if no manual shares provided
+            estimated_shares = 0
+            cash_remainder = 0.0
+            if current_price > 0:
+                if shares > 0:
+                    # Use manual shares
+                    estimated_shares = int(shares)
+                else:
+                    # Calculate automatic shares
+                    estimated_shares = int(dollar_allocation / current_price)
+
+                cash_remainder = dollar_allocation - (estimated_shares * current_price)
+                total_invested += estimated_shares * current_price
 
             manual_df_data.append({
                 'Index': i,
                 'Ticker': asset_data['ticker'],
-                'Weight %': f"{asset_data['weight']:.2f}%",
-                'Current Price': f"${asset_data.get('current_price', 0):.2f}" if asset_data.get('current_price') else "Fetching...",
+                'Weight %': f"{weight:.2f}%",
+                'Current Price': f"${current_price:.2f}" if current_price > 0 else "Fetching...",
                 'Dollar Allocation': f"${dollar_allocation:,.2f}",
-                'Estimated Shares': f"{int(dollar_allocation / asset_data.get('current_price', 1))}" if asset_data.get('current_price') else "TBD",
-                'Cash Remainder': f"${(dollar_allocation % asset_data.get('current_price', 1)):.2f}" if asset_data.get('current_price') else "TBD",
-                'Manual Shares': f"{asset_data.get('shares', 0):.0f}" if asset_data.get('shares') else "-"
+                'Estimated Shares': f"{estimated_shares}" if current_price > 0 else "TBD",
+                'Cash Remainder': f"${cash_remainder:.2f}" if current_price > 0 else "TBD",
+                'Manual Shares': f"{shares:.0f}" if shares > 0 else "-"
             })
-            total_weight += asset_data['weight']
+
+            # Add weight to total (now both are guaranteed to be numbers)
+            total_weight += weight
 
         manual_df = pd.DataFrame(manual_df_data)
         st.dataframe(manual_df.drop('Index', axis=1), use_container_width=True, hide_index=True)
@@ -507,11 +547,6 @@ def render_manual_creation_form():
             st.markdown(f"**Total Weight:** {weight_color} {total_weight:.2f}%")
 
         with col2:
-            total_invested = sum(
-                int((asset_data['weight'] / 100) * initial_value / asset_data.get('current_price', 1)) * asset_data.get('current_price', 0)
-                for asset_data in st.session_state.manual_assets
-                if asset_data.get('current_price')
-            )
             st.markdown(f"**Invested:** ${total_invested:,.2f}")
 
         with col3:
@@ -814,16 +849,152 @@ def add_manual_asset_with_price_fetch(ticker: str, weight_percent: float, shares
     except Exception as e:
         st.warning(f"Error fetching price for {ticker}: {e}")
 
-    # Add to list
+    # Add to list - ensure all values are proper types
     asset_data = {
         'ticker': ticker,
-        'weight': weight_percent,
-        'shares': shares if shares > 0 else None,
-        'current_price': current_price
+        'weight': float(weight_percent),  # Ensure it's a float
+        'shares': float(shares) if shares > 0 else 0.0,  # Ensure it's a float or 0
+        'current_price': float(current_price) if current_price else None  # Ensure it's float or None
     }
 
     st.session_state.manual_assets.append(asset_data)
     st.success(f"Added {ticker} ({weight_percent:.1f}%)")
+
+
+def update_manual_asset_prices():
+    """Update prices for all manual assets"""
+
+    if 'manual_assets' not in st.session_state or not st.session_state.manual_assets:
+        st.warning("No manual assets to update")
+        return
+
+    tickers = [asset['ticker'] for asset in st.session_state.manual_assets]
+
+    try:
+        with st.spinner("Updating prices..."):
+            price_manager = get_price_manager()
+            prices = price_manager.get_current_prices(tickers)
+
+        updated_count = 0
+        for asset in st.session_state.manual_assets:
+            ticker = asset['ticker']
+            if ticker in prices and prices[ticker]:
+                asset['current_price'] = float(prices[ticker])  # Ensure it's a float
+                updated_count += 1
+
+        if updated_count > 0:
+            st.success(f"Updated {updated_count} prices")
+        else:
+            st.warning("No prices were updated")
+
+    except Exception as e:
+        st.error(f"Error updating prices: {e}")
+
+
+def normalize_manual_weights():
+    """Normalize weights in manual asset list"""
+
+    if 'manual_assets' not in st.session_state or not st.session_state.manual_assets:
+        st.warning("No manual assets to normalize")
+        return
+
+    # Safely calculate total weight with default values
+    total_weight = 0.0
+    for asset in st.session_state.manual_assets:
+        weight = asset.get('weight', 0.0)
+        if weight is not None:
+            total_weight += float(weight)
+
+    if total_weight > 0:
+        for asset in st.session_state.manual_assets:
+            current_weight = asset.get('weight', 0.0) or 0.0
+            asset['weight'] = float((current_weight / total_weight) * 100)
+
+        st.success("Weights normalized to 100%")
+    else:
+        st.error("Total weight is zero - cannot normalize")
+
+
+def create_manual_portfolio(name: str, description: str, portfolio_type: str, initial_value: float):
+    """Create portfolio from manual asset list"""
+
+    try:
+        with st.spinner("Creating portfolio..."):
+            # Get manual assets from session state
+            manual_assets = st.session_state.get('manual_assets', [])
+
+            if not manual_assets:
+                st.error("No assets added")
+                return
+
+            # Convert to Asset objects
+            assets = []
+            from core.data_manager import Asset, AssetClass
+
+            for asset_data in manual_assets:
+                # Safely get values with defaults
+                weight = asset_data.get('weight', 0.0) or 0.0
+                shares = asset_data.get('shares', 0.0) or 0.0
+                current_price = asset_data.get('current_price')
+
+                asset = Asset(
+                    ticker=asset_data['ticker'],
+                    weight=float(weight) / 100.0,  # Convert to decimal and ensure float
+                    shares=float(shares),  # Ensure float
+                    current_price=float(current_price) if current_price else None,  # Ensure float or None
+                    asset_class=AssetClass.STOCK
+                )
+                assets.append(asset)
+
+            # Create portfolio
+            portfolio_manager = get_portfolio_manager()
+            from core.data_manager import PortfolioType
+
+            portfolio = portfolio_manager.create_portfolio(
+                name=name,
+                description=description,
+                assets=assets,
+                portfolio_type=PortfolioType(portfolio_type),
+                initial_value=initial_value
+            )
+
+            # Update prices for all assets after creation
+            try:
+                price_manager = get_price_manager()
+                tickers = [asset.ticker for asset in portfolio.assets]
+                prices = price_manager.get_current_prices(tickers)
+
+                for asset in portfolio.assets:
+                    if asset.ticker in prices and prices[asset.ticker]:
+                        asset.current_price = prices[asset.ticker]
+                        # Recalculate shares based on weight and current price
+                        if asset.weight and initial_value and asset.current_price:
+                            allocation = asset.weight * initial_value
+                            asset.shares = int(allocation / asset.current_price)
+
+                # Update the portfolio with new prices using update_portfolio method
+                portfolio_manager.update_portfolio(portfolio.id, {"assets": portfolio.assets})
+                st.success("✅ Prices updated successfully!")
+
+            except Exception as e:
+                st.warning(f"Portfolio created but couldn't update prices: {e}")
+
+            # Clear manual assets
+            st.session_state.manual_assets = []
+
+            # Refresh and select
+            refresh_portfolios()
+            set_selected_portfolio(portfolio)
+
+            st.success(f"Portfolio '{name}' created successfully!")
+            display_portfolio_summary(portfolio)
+
+    except Exception as e:
+        st.error(f"Error creating portfolio: {str(e)}")
+        # Log the full error for debugging
+        import traceback
+        st.error(f"Debug info: {traceback.format_exc()}")
+        st.error(f"Debug info: {traceback.format_exc()}")
 
 
 def update_manual_asset_prices():
@@ -875,13 +1046,13 @@ def normalize_manual_weights():
 
 
 def create_portfolio_from_text(
-    name: str,
-    description: str,
-    text: str,
-    portfolio_type: str,
-    initial_value: float,
-    auto_normalize: bool,
-    fetch_info: bool
+        name: str,
+        description: str,
+        text: str,
+        portfolio_type: str,
+        initial_value: float,
+        auto_normalize: bool,
+        fetch_info: bool
 ):
     """Create portfolio from text input"""
 
@@ -903,24 +1074,42 @@ def create_portfolio_from_text(
                 initial_value=initial_value
             )
 
-            # Fetch company information if requested
-            if fetch_info:
-                update_company_info(portfolio)
-
             # Update prices and calculate shares
-            if initial_value > 0:
-                try:
-                    price_manager = get_price_manager()
-                    tickers = [asset.ticker for asset in portfolio.assets]
-                    prices = price_manager.get_current_prices(tickers)
+            try:
+                price_manager = get_price_manager()
+                tickers = [asset.ticker for asset in portfolio.assets]
+                prices = price_manager.get_current_prices(tickers)
 
-                    for asset in portfolio.assets:
-                        if asset.ticker in prices and prices[asset.ticker]:
-                            asset.current_price = prices[asset.ticker]
+                for asset in portfolio.assets:
+                    if asset.ticker in prices and prices[asset.ticker]:
+                        asset.current_price = prices[asset.ticker]
+                        # Calculate shares based on weight and current price
+                        if asset.weight and initial_value and asset.current_price:
                             allocation = asset.weight * initial_value
                             asset.shares = int(allocation / asset.current_price)
-                except Exception as e:
-                    st.warning(f"Could not update prices: {e}")
+
+                # Fetch company information if requested
+                if fetch_info:
+                    for asset in portfolio.assets:
+                        try:
+                            company_info = price_manager.get_company_info(asset.ticker)
+                            if company_info:
+                                if not asset.name:
+                                    asset.name = company_info.name
+                                if not asset.sector:
+                                    asset.sector = company_info.sector or "Unknown"
+                        except Exception:
+                            if not asset.name:
+                                asset.name = f"{asset.ticker} Corp"
+                            if not asset.sector:
+                                asset.sector = "Unknown"
+
+                # Update the portfolio with new data
+                portfolio_manager.update_portfolio(portfolio.id, {"assets": portfolio.assets})
+                st.success("✅ Prices and company info updated!")
+
+            except Exception as e:
+                st.warning(f"Portfolio created but couldn't update prices: {e}")
 
             # Refresh portfolio list and set as selected
             refresh_portfolios()
@@ -931,6 +1120,8 @@ def create_portfolio_from_text(
 
     except Exception as e:
         st.error(f"Error creating portfolio: {str(e)}")
+        import traceback
+        st.error(f"Debug info: {traceback.format_exc()}")
 
 
 def create_manual_portfolio(name: str, description: str, portfolio_type: str, initial_value: float):
@@ -986,11 +1177,11 @@ def create_manual_portfolio(name: str, description: str, portfolio_type: str, in
 
 
 def create_template_portfolio(
-    name: str,
-    description: str,
-    template: dict,
-    initial_value: float,
-    fetch_prices: bool
+        name: str,
+        description: str,
+        template: dict,
+        initial_value: float,
+        fetch_prices: bool
 ):
     """Create portfolio from template"""
 
@@ -1028,14 +1219,33 @@ def create_template_portfolio(
                     tickers = [asset.ticker for asset in portfolio.assets]
                     prices = price_manager.get_current_prices(tickers)
 
-                    # Calculate shares
+                    # Update prices and calculate shares
                     for asset in portfolio.assets:
                         if asset.ticker in prices and prices[asset.ticker]:
                             asset.current_price = prices[asset.ticker]
-                            allocation = asset.weight * initial_value
-                            asset.shares = int(allocation / asset.current_price)
+                            # Calculate shares based on weight and current price
+                            if asset.weight and initial_value and asset.current_price:
+                                allocation = asset.weight * initial_value
+                                asset.shares = int(allocation / asset.current_price)
+
+                        # Also try to get company info for sectors
+                        try:
+                            company_info = price_manager.get_company_info(asset.ticker)
+                            if company_info:
+                                if not asset.name or asset.name == desc:
+                                    asset.name = company_info.name
+                                if not asset.sector:
+                                    asset.sector = company_info.sector or "Unknown"
+                        except Exception:
+                            if not asset.sector:
+                                asset.sector = "Unknown"
+
+                    # Update the portfolio with new data
+                    portfolio_manager.update_portfolio(portfolio.id, {"assets": portfolio.assets})
+                    st.success("✅ Prices and company info updated!")
+
                 except Exception as e:
-                    st.warning(f"Could not update prices: {e}")
+                    st.warning(f"Portfolio created but couldn't update prices: {e}")
 
             # Refresh and select
             refresh_portfolios()
@@ -1045,7 +1255,9 @@ def create_template_portfolio(
             display_portfolio_summary(portfolio)
 
     except Exception as e:
-        st.error(f"Error creating template portfolio: {e}")
+        st.error(f"Error creating template portfolio: {str(e)}")
+        import traceback
+        st.error(f"Debug info: {traceback.format_exc()}")
 
 
 def import_portfolio_from_file(

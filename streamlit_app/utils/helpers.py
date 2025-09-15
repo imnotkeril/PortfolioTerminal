@@ -23,15 +23,59 @@ from core.data_manager import Portfolio, Asset
 
 def display_portfolio_summary(portfolio: Portfolio):
     """
-    Display a summary card for a portfolio.
+    Display a unified summary card for a portfolio with auto-fetched sectors and remaining cash.
 
     Args:
         portfolio: Portfolio object to summarize
     """
+    from .session_state import get_price_manager
 
     # Calculate basic metrics
     total_assets = len(portfolio.assets)
     total_value = portfolio.calculate_value()
+
+    # Calculate remaining cash
+    invested_value = 0.0
+    price_manager = get_price_manager()
+
+    # Try to auto-fetch company info for assets without sectors (but don't save to avoid method errors)
+    assets_needing_update = [asset for asset in portfolio.assets if
+                             not asset.sector or not asset.name or asset.sector == "Unknown"]
+
+    if assets_needing_update:
+        for asset in assets_needing_update:
+            try:
+                # Try to get company info from API
+                company_info = price_manager.get_company_info(asset.ticker)
+                if company_info:
+                    if not asset.name or asset.name == f"{asset.ticker} Corp":
+                        asset.name = company_info.name
+
+                    if not asset.sector or asset.sector == "Unknown":
+                        asset.sector = company_info.sector or "Unknown"
+                else:
+                    # Set defaults if API fails
+                    if not asset.name:
+                        asset.name = f"{asset.ticker} Corp"
+                    if not asset.sector:
+                        asset.sector = "Unknown"
+
+            except Exception:
+                # Set defaults if everything fails
+                if not asset.name:
+                    asset.name = f"{asset.ticker} Corp"
+                if not asset.sector:
+                    asset.sector = "Unknown"
+
+    # Calculate invested value based on current prices and shares
+    for asset in portfolio.assets:
+        if asset.current_price and asset.shares:
+            invested_value += asset.current_price * asset.shares
+        elif asset.weight and portfolio.initial_value:
+            # Fallback to weight-based calculation
+            invested_value += asset.weight * portfolio.initial_value
+
+    remaining_cash = max(0, portfolio.initial_value - invested_value)
 
     # Create columns for layout
     col1, col2, col3, col4 = st.columns(4)
@@ -46,8 +90,8 @@ def display_portfolio_summary(portfolio: Portfolio):
         st.metric("Portfolio Type", portfolio.portfolio_type.value.title())
 
     with col4:
-        created_days_ago = (datetime.now() - portfolio.created_date).days
-        st.metric("Age (Days)", created_days_ago)
+        # Show remaining cash instead of age
+        st.metric("Remaining Cash", f"${remaining_cash:,.2f}")
 
     # Show asset breakdown
     if portfolio.assets:
@@ -61,7 +105,10 @@ def display_portfolio_summary(portfolio: Portfolio):
             col1, col2, col3 = st.columns([3, 1, 1])
 
             with col1:
-                st.write(f"**{asset.ticker}** - {asset.name or 'N/A'}")
+                # Display ticker, name, and sector
+                display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
+                sector_info = f" • {asset.sector}" if asset.sector and asset.sector != "Unknown" else ""
+                st.write(f"**{asset.ticker}** - {display_name}{sector_info}")
 
             with col2:
                 st.write(f"{asset.weight:.1%}")
@@ -73,38 +120,183 @@ def display_portfolio_summary(portfolio: Portfolio):
                     st.write("N/A")
 
 
+def force_update_company_info(portfolio: Portfolio):
+    """Force update company information for all assets"""
+    from .session_state import get_price_manager, get_portfolio_manager
+
+    price_manager = get_price_manager()
+    updated_count = 0
+
+    with st.spinner("Updating all company information..."):
+        for asset in portfolio.assets:
+            try:
+                company_info = price_manager.get_company_info(asset.ticker)
+                if company_info:
+                    asset.name = company_info.name
+                    asset.sector = company_info.sector or "Unknown"
+                    updated_count += 1
+                else:
+                    # Set defaults
+                    asset.name = f"{asset.ticker} Corp"
+                    asset.sector = "Unknown"
+
+            except Exception as e:
+                st.warning(f"Could not fetch info for {asset.ticker}: {e}")
+                asset.name = f"{asset.ticker} Corp"
+                asset.sector = "Unknown"
+
+        # Save portfolio
+        try:
+            portfolio_manager = get_portfolio_manager()
+            portfolio_manager.save_portfolio(portfolio)
+            st.success(f"✅ Updated and saved information for {updated_count} assets!")
+        except Exception as e:
+            st.error(f"Error saving portfolio: {e}")
+
+    # Create columns for layout
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Assets", total_assets)
+
+    with col2:
+        st.metric("Total Value", f"${total_value:,.2f}")
+
+    with col3:
+        st.metric("Portfolio Type", portfolio.portfolio_type.value.title())
+
+    with col4:
+        # Show remaining cash instead of age
+        st.metric("Remaining Cash", f"${remaining_cash:,.2f}")
+
+    # Show asset breakdown
+    if portfolio.assets:
+        st.subheader("Top Holdings")
+
+        # Sort assets by weight
+        sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
+        top_assets = sorted_assets[:5]  # Show top 5
+
+        for asset in top_assets:
+            col1, col2, col3 = st.columns([3, 1, 1])
+
+            with col1:
+                # Display ticker, name, and sector
+                display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
+                sector_info = f" • {asset.sector}" if asset.sector and asset.sector != "Unknown" else ""
+                st.write(f"**{asset.ticker}** - {display_name}{sector_info}")
+
+            with col2:
+                st.write(f"{asset.weight:.1%}")
+
+            with col3:
+                if hasattr(asset, 'current_price') and asset.current_price:
+                    st.write(f"${asset.current_price:.2f}")
+                else:
+                    st.write("N/A")
+
+
+def force_update_company_info(portfolio: Portfolio):
+    """Force update company information for all assets"""
+    from .session_state import get_price_manager, get_portfolio_manager
+
+    price_manager = get_price_manager()
+    updated_count = 0
+
+    with st.spinner("Updating all company information..."):
+        for asset in portfolio.assets:
+            try:
+                company_info = price_manager.get_company_info(asset.ticker)
+                if company_info:
+                    asset.name = company_info.name
+                    asset.sector = company_info.sector or "Unknown"
+                    updated_count += 1
+                else:
+                    # Set defaults
+                    asset.name = f"{asset.ticker} Corp"
+                    asset.sector = "Unknown"
+
+            except Exception as e:
+                st.warning(f"Could not fetch info for {asset.ticker}: {e}")
+                asset.name = f"{asset.ticker} Corp"
+                asset.sector = "Unknown"
+
+        # Save portfolio
+        try:
+            portfolio_manager = get_portfolio_manager()
+            portfolio_manager.save_portfolio(portfolio)
+            st.success(f"✅ Updated and saved information for {updated_count} assets!")
+        except Exception as e:
+            st.error(f"Error saving portfolio: {e}")
+
+
 def update_company_info(portfolio: Portfolio):
     """
-    Update company information for portfolio assets.
+    Update company information for portfolio assets using real API data.
 
     Args:
         portfolio: Portfolio object to update
     """
+    from .session_state import get_price_manager
 
     with st.spinner("Fetching company information..."):
-        # This is a placeholder for company info fetching
-        # In a real implementation, you would fetch from an API
-
-        company_info = {
-            'AAPL': {'name': 'Apple Inc.', 'sector': 'Technology'},
-            'MSFT': {'name': 'Microsoft Corporation', 'sector': 'Technology'},
-            'GOOGL': {'name': 'Alphabet Inc.', 'sector': 'Technology'},
-            'AMZN': {'name': 'Amazon.com Inc.', 'sector': 'Consumer Discretionary'},
-            'TSLA': {'name': 'Tesla Inc.', 'sector': 'Automotive'},
-            'NVDA': {'name': 'NVIDIA Corporation', 'sector': 'Technology'},
-            'META': {'name': 'Meta Platforms Inc.', 'sector': 'Technology'},
-            'BRK-B': {'name': 'Berkshire Hathaway Inc.', 'sector': 'Financial Services'},
-            'V': {'name': 'Visa Inc.', 'sector': 'Financial Services'},
-            'JNJ': {'name': 'Johnson & Johnson', 'sector': 'Healthcare'},
-        }
+        price_manager = get_price_manager()
+        updated_count = 0
 
         for asset in portfolio.assets:
-            if asset.ticker in company_info:
-                info = company_info[asset.ticker]
-                asset.name = info.get('name', asset.name)
-                asset.sector = info.get('sector', getattr(asset, 'sector', None))
+            try:
+                # Get company info from Yahoo Finance API
+                company_info = price_manager.get_company_info(asset.ticker)
 
-        time.sleep(1)  # Simulate API delay
+                if company_info:
+                    # Update name if not set
+                    if not asset.name or asset.name == f"{asset.ticker} Corp":
+                        asset.name = company_info.name
+
+                    # Update sector if not set
+                    if not asset.sector or asset.sector == "Unknown":
+                        asset.sector = company_info.sector or "Unknown"
+
+                    # Update industry if available
+                    if hasattr(asset, 'industry') and company_info.industry:
+                        asset.industry = company_info.industry
+
+                    # Update market cap if available
+                    if hasattr(asset, 'market_cap') and company_info.market_cap:
+                        asset.market_cap = company_info.market_cap
+
+                    # Update country if available
+                    if hasattr(asset, 'country') and company_info.country:
+                        asset.country = company_info.country
+
+                    updated_count += 1
+                else:
+                    # Fallback data if API fails
+                    if not asset.name:
+                        asset.name = f"{asset.ticker} Corp"
+                    if not asset.sector:
+                        asset.sector = "Unknown"
+
+            except Exception as e:
+                st.warning(f"Could not fetch info for {asset.ticker}: {str(e)}")
+                # Set fallback values
+                if not asset.name:
+                    asset.name = f"{asset.ticker} Corp"
+                if not asset.sector:
+                    asset.sector = "Unknown"
+
+        if updated_count > 0:
+            st.success(f"Updated company information for {updated_count} assets")
+
+            # Show what sectors were found
+            sectors_found = set(
+                asset.sector for asset in portfolio.assets if asset.sector and asset.sector != "Unknown")
+            if sectors_found:
+                st.info(f"Sectors identified: {', '.join(sorted(sectors_found))}")
+        else:
+            st.info("No new company information was available")
+
+        time.sleep(1)  # Brief pause for user experience
 
 
 def update_portfolio_prices(portfolio: Portfolio):

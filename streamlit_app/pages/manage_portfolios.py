@@ -377,9 +377,9 @@ def render_detailed_portfolio_view(portfolio: Portfolio):
 
     with col5:
         st.metric(
-            label="Daily Return",
-            value=metrics['daily_return']['value'],
-            delta_color=metrics['daily_return']['delta_color']
+            label="Remaining Cash",  # Changed from "Daily Return"
+            value=metrics['remaining_cash']['value'],  # Changed from daily_return
+            delta_color=metrics['remaining_cash']['delta_color']
         )
 
     # Portfolio Information
