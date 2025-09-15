@@ -14,7 +14,10 @@ project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 # Import utility modules
-from streamlit_app.utils.session_state import initialize_session_state, get_portfolios, get_last_price_update
+from streamlit_app.utils.session_state import (
+    initialize_session_state, get_portfolios, get_last_price_update,
+    get_selected_portfolio, set_selected_portfolio
+)
 from streamlit_app.utils.formatting import format_currency, format_datetime
 
 # Import page modules
@@ -253,7 +256,7 @@ def load_css():
 # ================================
 
 def render_header():
-    """Render main application header with system status."""
+    """Render main application header."""
 
     st.markdown("""
     <div class="main-header">
@@ -262,32 +265,7 @@ def render_header():
     </div>
     """, unsafe_allow_html=True)
 
-    # System status indicators
-    col1, col2, col3, col4 = st.columns(4)
 
-    with col1:
-        # Market status (placeholder)
-        market_status = "Open"  # This would come from price manager
-        status_color = "🟢" if market_status == "Open" else "🔴"
-        st.metric("Market Status", f"{status_color} {market_status}")
-
-    with col2:
-        portfolio_count = len(get_portfolios())
-        st.metric("Total Portfolios", portfolio_count)
-
-    with col3:
-        # Cache status (placeholder)
-        st.metric("Data Cache", "✅ Active")
-
-    with col4:
-        last_update = get_last_price_update()
-        if last_update:
-            from datetime import datetime
-            time_ago = datetime.now() - last_update
-            update_text = f"{time_ago.seconds // 60}m ago"
-        else:
-            update_text = "Never"
-        st.metric("Last Update", update_text)
 
 
 # ================================
@@ -336,7 +314,7 @@ def render_sidebar_quick_actions():
 
     st.subheader("⚡ Quick Actions")
 
-    if st.button("🔄 Refresh Data", use_container_width=True):
+    if st.button("🔄 Refresh Data", width="stretch"):
         from streamlit_app.utils.session_state import refresh_portfolios, get_price_manager
         refresh_portfolios()
         try:
@@ -347,27 +325,39 @@ def render_sidebar_quick_actions():
         st.success("Data refreshed!")
         st.rerun()
 
-    if st.button("📥 Import Portfolio", use_container_width=True):
-        st.session_state.main_navigation = "📝 Create Portfolio"
-        st.rerun()
+    if st.button("📥 Import Portfolio", width="stretch"):
+        # Просто переход на создание, не меняем session state navigation
+        st.info("Use Create Portfolio page to import portfolios")
 
 
+# ЗАМЕНИТЬ ВСЮ ФУНКЦИЮ:
 def render_sidebar_portfolio_selector():
     """Render portfolio selector in sidebar."""
 
     portfolios = get_portfolios()
 
     if portfolios:
-        st.subheader("📁 Select Portfolio")
+        st.subheader("📁 Portfolio")
 
-        portfolio_names = ["None"] + [p.name for p in portfolios]
+        portfolio_names = ["Select Portfolio..."] + [p.name for p in portfolios]
+
+        # Проверяем, есть ли уже выбранный портфель
+        current_portfolio = get_selected_portfolio()
+        default_index = 0
+        if current_portfolio:
+            try:
+                default_index = portfolio_names.index(current_portfolio.name)
+            except ValueError:
+                default_index = 0
+
         selected_name = st.selectbox(
             "Current Portfolio",
             portfolio_names,
+            index=default_index,
             key="portfolio_selector"
         )
 
-        if selected_name != "None":
+        if selected_name != "Select Portfolio...":
             from streamlit_app.utils.session_state import set_selected_portfolio
             selected_portfolio = next(
                 (p for p in portfolios if p.name == selected_name), None
@@ -375,14 +365,14 @@ def render_sidebar_portfolio_selector():
             set_selected_portfolio(selected_portfolio)
 
             if selected_portfolio:
-                st.success(f"✅ {selected_portfolio.name}")
+                st.success(f"✅ Selected")
                 st.caption(f"Assets: {len(selected_portfolio.assets)}")
                 st.caption(f"Value: {format_currency(selected_portfolio.calculate_value())}")
         else:
             from streamlit_app.utils.session_state import set_selected_portfolio
             set_selected_portfolio(None)
     else:
-        st.info("No portfolios created yet")
+        st.info("No portfolios yet")
 
 
 def render_sidebar_system_info():
@@ -532,11 +522,12 @@ def main():
     # Load CSS styling
     load_css()
 
-    # Render header
-    render_header()
-
     # Render sidebar and get selected page
     current_page = render_sidebar()
+
+    # Render header only on dashboard
+    if current_page == "🏠 Dashboard":
+        render_header()
 
     # Route to appropriate page
     render_page(current_page)
