@@ -21,119 +21,147 @@ from ..utils.formatting import format_currency, format_percentage, format_large_
 from ..utils.helpers import get_unique_colors, safe_divide
 
 
-def create_portfolio_allocation_chart(portfolio: Portfolio, chart_type: str = "pie") -> go.Figure:
+# В файле streamlit_app/components/charts.py
+# Найди функцию create_portfolio_allocation_chart и замени на:
+
+def create_portfolio_allocation_chart(portfolio, chart_type="pie", include_cash=True):
     """
-    Create portfolio allocation visualization.
+    Create portfolio allocation chart with optional cash inclusion.
 
     Args:
         portfolio: Portfolio object
-        chart_type: Type of chart ('pie', 'donut', 'bar', 'treemap')
-
-    Returns:
-        Plotly figure object
+        chart_type: Type of chart ("pie", "donut", "bar")
+        include_cash: Whether to include cash position
     """
+    import plotly.graph_objects as go
+    import plotly.express as px
 
     if not portfolio.assets:
-        # Return empty chart
-        fig = go.Figure()
-        fig.add_annotation(
-            text="No assets in portfolio",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5,
-            showarrow=False,
-            font=dict(size=16)
-        )
-        return fig
+        return create_empty_chart("No assets in portfolio")
 
     # Prepare data
-    tickers = [asset.ticker for asset in portfolio.assets]
-    weights = [asset.weight for asset in portfolio.assets]
-    names = [asset.name or asset.ticker for asset in portfolio.assets]
+    tickers = []
+    weights = []
+    values = []
+    colors = []
 
-    # Sort by weight for better visualization
-    sorted_data = sorted(zip(tickers, weights, names), key=lambda x: x[1], reverse=True)
-    tickers, weights, names = zip(*sorted_data)
+    total_value = portfolio.calculate_value()
+    total_allocated_weight = sum(asset.weight for asset in portfolio.assets)
+
+    # Add regular assets
+    for asset in portfolio.assets:
+        tickers.append(asset.ticker)
+        weights.append(asset.weight)
+        values.append(asset.weight * total_value)
+        colors.append(None)  # Use default colors
+
+    # Add cash if requested and significant
+    cash_percentage = 1.0 - total_allocated_weight
+    if include_cash and cash_percentage > 0.001:  # Show if > 0.1%
+        tickers.append("💰 CASH")
+        weights.append(cash_percentage)
+        values.append(cash_percentage * total_value)
+        colors.append("#90EE90")  # Light green for cash
 
     # Create chart based on type
-    if chart_type == "pie":
+    if chart_type in ["pie", "donut"]:
+        hole_size = 0.3 if chart_type == "donut" else 0
+
         fig = go.Figure(data=[go.Pie(
             labels=tickers,
             values=weights,
-            text=[f"{name}<br>{format_percentage(weight)}" for name, weight in zip(names, weights)],
-            textinfo="label+percent",
-            hovertemplate="<b>%{label}</b><br>" +
-                          "Weight: %{percent}<br>" +
-                          "Value: %{value:.1%}<br>" +
-                          "<extra></extra>",
-            hole=0
+            hole=hole_size,
+            textinfo='label+percent',
+            textposition='inside',
+            marker=dict(
+                colors=colors if any(colors) else None,
+                line=dict(color='#FFFFFF', width=2)
+            ),
+            hovertemplate='<b>%{label}</b><br>' +
+                          'Weight: %{percent}<br>' +
+                          'Value: $%{customdata:,.0f}<extra></extra>',
+            customdata=values
         )])
 
+        fig.update_traces(textfont_size=11, textfont_color="white")
         fig.update_layout(
-            title="Portfolio Allocation",
+            title={
+                'text': "Portfolio Allocation" + (" (with Cash)" if include_cash and cash_percentage > 0.001 else ""),
+                'x': 0.5,
+                'xanchor': 'center'
+            },
             showlegend=True,
-            legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.01)
-        )
-
-    elif chart_type == "donut":
-        fig = go.Figure(data=[go.Pie(
-            labels=tickers,
-            values=weights,
-            text=[f"{name}<br>{format_percentage(weight)}" for name, weight in zip(names, weights)],
-            textinfo="label+percent",
-            hovertemplate="<b>%{label}</b><br>" +
-                          "Weight: %{percent}<br>" +
-                          "Value: %{value:.1%}<br>" +
-                          "<extra></extra>",
-            hole=0.4
-        )])
-
-        fig.update_layout(
-            title="Portfolio Allocation",
-            showlegend=True,
-            annotations=[dict(text=portfolio.name, x=0.5, y=0.5, font_size=12, showarrow=False)]
+            legend=dict(
+                orientation="v",
+                yanchor="middle",
+                y=0.5,
+                x=1.02
+            ),
+            height=400,
+            margin=dict(l=20, r=120, t=50, b=20)
         )
 
     elif chart_type == "bar":
+        # Sort by weight for better visualization
+        sorted_data = sorted(zip(tickers, weights, values), key=lambda x: x[1], reverse=True)
+        sorted_tickers, sorted_weights, sorted_values = zip(*sorted_data)
+
+        # Create colors for bars
+        bar_colors = [
+            '#90EE90' if ticker == '💰 CASH' else px.colors.qualitative.Set3[i % len(px.colors.qualitative.Set3)]
+            for i, ticker in enumerate(sorted_tickers)]
+
         fig = go.Figure(data=[go.Bar(
-            x=tickers,
-            y=[w * 100 for w in weights],  # Convert to percentage
-            text=[format_percentage(w) for w in weights],
-            textposition='auto',
-            hovertemplate="<b>%{x}</b><br>" +
-                          "Weight: %{y:.1f}%<br>" +
-                          "<extra></extra>",
+            x=sorted_tickers,
+            y=[w * 100 for w in sorted_weights],  # Convert to percentage
+            marker_color=bar_colors,
+            hovertemplate='<b>%{x}</b><br>' +
+                          'Weight: %{y:.1f}%<br>' +
+                          'Value: $%{customdata:,.0f}<extra></extra>',
+            customdata=sorted_values
         )])
 
         fig.update_layout(
-            title="Portfolio Allocation",
+            title="Portfolio Asset Allocation",
             xaxis_title="Assets",
             yaxis_title="Weight (%)",
+            height=400,
             showlegend=False
         )
 
-    elif chart_type == "treemap":
-        fig = go.Figure(go.Treemap(
-            labels=tickers,
-            values=weights,
-            parents=["Portfolio"] * len(tickers),
-            text=[f"{ticker}<br>{format_percentage(weight)}" for ticker, weight in zip(tickers, weights)],
-            hovertemplate="<b>%{label}</b><br>" +
-                          "Weight: %{value:.1%}<br>" +
-                          "<extra></extra>",
-        ))
-
-        fig.update_layout(title="Portfolio Allocation - TreeMap")
-
-    # Apply common styling
-    fig.update_layout(
-        height=400,
-        font=dict(family="Arial", size=10),
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)"
-    )
+        # Rotate x-axis labels if too many assets
+        if len(sorted_tickers) > 8:
+            fig.update_xaxes(tickangle=45)
 
     return fig
 
+
+def create_portfolio_allocation_chart_with_cash(portfolio, chart_type="pie"):
+    """Wrapper function that always includes cash - for backward compatibility."""
+    return create_portfolio_allocation_chart(portfolio, chart_type, include_cash=True)
+
+
+def create_empty_chart(message="No data available"):
+    """Create empty chart with message."""
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    fig.add_annotation(
+        text=message,
+        xref="paper", yref="paper",
+        x=0.5, y=0.5,
+        xanchor='center', yanchor='middle',
+        showarrow=False,
+        font=dict(size=16, color="gray")
+    )
+    fig.update_layout(
+        height=300,
+        showlegend=False,
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False)
+    )
+
+    return fig
 
 def create_sector_allocation_chart(portfolio: Portfolio) -> go.Figure:
     """

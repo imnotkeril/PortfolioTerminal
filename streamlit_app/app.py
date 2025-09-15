@@ -266,8 +266,6 @@ def render_header():
     """, unsafe_allow_html=True)
 
 
-
-
 # ================================
 # SIDEBAR NAVIGATION
 # ================================
@@ -278,7 +276,7 @@ def render_sidebar():
     with st.sidebar:
         st.title("📊 Navigation")
 
-        # Main navigation
+        # Main navigation only
         page = st.radio(
             "Select Page",
             [
@@ -293,86 +291,10 @@ def render_sidebar():
 
         st.divider()
 
-        # Quick actions section
-        render_sidebar_quick_actions()
-
-        st.divider()
-
-        # Portfolio selector section
-        render_sidebar_portfolio_selector()
-
-        st.divider()
-
-        # System information
+        # System information only
         render_sidebar_system_info()
 
     return page
-
-
-def render_sidebar_quick_actions():
-    """Render quick action buttons in sidebar."""
-
-    st.subheader("⚡ Quick Actions")
-
-    if st.button("🔄 Refresh Data", width="stretch"):
-        from streamlit_app.utils.session_state import refresh_portfolios, get_price_manager
-        refresh_portfolios()
-        try:
-            price_manager = get_price_manager()
-            price_manager.clear_cache()
-        except:
-            pass
-        st.success("Data refreshed!")
-        st.rerun()
-
-    if st.button("📥 Import Portfolio", width="stretch"):
-        # Просто переход на создание, не меняем session state navigation
-        st.info("Use Create Portfolio page to import portfolios")
-
-
-# ЗАМЕНИТЬ ВСЮ ФУНКЦИЮ:
-def render_sidebar_portfolio_selector():
-    """Render portfolio selector in sidebar."""
-
-    portfolios = get_portfolios()
-
-    if portfolios:
-        st.subheader("📁 Portfolio")
-
-        portfolio_names = ["Select Portfolio..."] + [p.name for p in portfolios]
-
-        # Проверяем, есть ли уже выбранный портфель
-        current_portfolio = get_selected_portfolio()
-        default_index = 0
-        if current_portfolio:
-            try:
-                default_index = portfolio_names.index(current_portfolio.name)
-            except ValueError:
-                default_index = 0
-
-        selected_name = st.selectbox(
-            "Current Portfolio",
-            portfolio_names,
-            index=default_index,
-            key="portfolio_selector"
-        )
-
-        if selected_name != "Select Portfolio...":
-            from streamlit_app.utils.session_state import set_selected_portfolio
-            selected_portfolio = next(
-                (p for p in portfolios if p.name == selected_name), None
-            )
-            set_selected_portfolio(selected_portfolio)
-
-            if selected_portfolio:
-                st.success(f"✅ Selected")
-                st.caption(f"Assets: {len(selected_portfolio.assets)}")
-                st.caption(f"Value: {format_currency(selected_portfolio.calculate_value())}")
-        else:
-            from streamlit_app.utils.session_state import set_selected_portfolio
-            set_selected_portfolio(None)
-    else:
-        st.info("No portfolios yet")
 
 
 def render_sidebar_system_info():
@@ -393,6 +315,9 @@ def render_sidebar_system_info():
 
         st.caption(f"**Total Assets:** {total_assets}")
         st.caption(f"**Combined Value:** {format_currency(total_value)}")
+    else:
+        st.caption("**Total Assets:** 0")
+        st.caption("**Combined Value:** $0.00")
 
 
 # ================================
@@ -427,7 +352,6 @@ def render_portfolio_analysis():
     st.header("📊 Portfolio Analysis")
     st.info("🚧 Portfolio Analysis page will be implemented in the next phase of refactoring")
 
-    from streamlit_app.utils.session_state import get_selected_portfolio
     selected_portfolio = get_selected_portfolio()
 
     if selected_portfolio:
@@ -457,7 +381,7 @@ def render_portfolio_analysis():
         st.info("📈 Advanced analytics, risk metrics, and performance analysis coming soon!")
 
     else:
-        st.info("💡 Select a portfolio from the sidebar to view detailed analysis")
+        st.info("💡 Select a portfolio from the Manage Portfolios page to view detailed analysis")
 
 
 def render_system_status():
