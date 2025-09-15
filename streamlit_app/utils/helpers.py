@@ -23,211 +23,292 @@ from core.data_manager import Portfolio, Asset
 
 def display_portfolio_summary(portfolio: Portfolio):
     """
-    Display a unified summary card for a portfolio with auto-fetched sectors and remaining cash.
+    Единая функция для отображения сводки портфеля везде одинаково.
+    Автоматически обновляет цены и информацию о компаниях.
 
     Args:
         portfolio: Portfolio object to summarize
     """
-    from .session_state import get_price_manager
+    from .session_state import get_price_manager, get_portfolio_manager
 
-    # Calculate basic metrics
-    total_assets = len(portfolio.assets)
-    total_value = portfolio.calculate_value()
-
-    # Calculate remaining cash
-    invested_value = 0.0
+    # Автоматически обновляем цены и информацию о компаниях
     price_manager = get_price_manager()
+    portfolio_manager = get_portfolio_manager()
 
-    # Try to auto-fetch company info for assets without sectors (but don't save to avoid method errors)
-    assets_needing_update = [asset for asset in portfolio.assets if
-                             not asset.sector or not asset.name or asset.sector == "Unknown"]
+    try:
+        # Обновляем цены для всех активов
+        tickers = [asset.ticker for asset in portfolio.assets]
+        prices = price_manager.get_current_prices(tickers)
 
-    if assets_needing_update:
-        for asset in assets_needing_update:
+        updated_any = False
+        for asset in portfolio.assets:
+            # Обновляем цену
+            if asset.ticker in prices and prices[asset.ticker]:
+                asset.current_price = prices[asset.ticker]
+                # Пересчитываем количество акций
+                if asset.weight and portfolio.initial_value and asset.current_price:
+                    allocation = asset.weight * portfolio.initial_value
+                    asset.shares = int(allocation / asset.current_price)
+                updated_any = True
+
+            # Обновляем информацию о компании если её нет
+            if not asset.name or asset.name == f"{asset.ticker} Corp" or not asset.sector or asset.sector == "Unknown":
+                try:
+                    # Сначала пробуем получить из API
+                    company_info = price_manager.get_company_info(asset.ticker)
+                    if company_info:
+                        if not asset.name or asset.name == f"{asset.ticker} Corp":
+                            asset.name = company_info.name or f"{asset.ticker} Corp"
+                        if not asset.sector or asset.sector == "Unknown":
+                            asset.sector = company_info.sector or "Unknown"
+                        updated_any = True
+
+                    # Если API не вернул сектор, используем наши данные для популярных ETF
+                    if not asset.sector or asset.sector == "Unknown":
+                        etf_sectors = {
+                            'VTI': 'Diversified',
+                            'VTIAX': 'International',
+                            'VEA': 'International',
+                            'VWO': 'Emerging Markets',
+                            'BND': 'Fixed Income',
+                            'VTEB': 'Fixed Income',
+                            'SPY': 'Diversified',
+                            'QQQ': 'Technology',
+                            'IWM': 'Small Cap',
+                            'EFA': 'International',
+                            'VYM': 'Dividend',
+                            'SCHD': 'Dividend',
+                            'GLD': 'Commodities',
+                            'SLV': 'Commodities',
+                            'TLT': 'Fixed Income',
+                            'AGG': 'Fixed Income',
+                            'LQD': 'Fixed Income',
+                            'HYG': 'Fixed Income',
+                            'ARKK': 'Innovation',
+                            'ARKQ': 'Innovation',
+                            'ARKG': 'Innovation',
+                            'XLK': 'Technology',
+                            'XLF': 'Financial',
+                            'XLE': 'Energy',
+                            'XLV': 'Healthcare',
+                            'XLI': 'Industrial',
+                            'XLY': 'Consumer Discretionary',
+                            'XLP': 'Consumer Staples',
+                            'XLRE': 'Real Estate',
+                            'XLB': 'Materials',
+                            'XLU': 'Utilities'
+                        }
+
+                        if asset.ticker in etf_sectors:
+                            asset.sector = etf_sectors[asset.ticker]
+                            updated_any = True
+
+                except:
+                    if not asset.name:
+                        asset.name = f"{asset.ticker} Corp"
+                    if not asset.sector:
+                        asset.sector = "Unknown"
+
+        # Сохраняем изменения если что-то обновилось
+        if updated_any:
             try:
-                # Try to get company info from API
-                company_info = price_manager.get_company_info(asset.ticker)
-                if company_info:
-                    if not asset.name or asset.name == f"{asset.ticker} Corp":
-                        asset.name = company_info.name
+                portfolio_manager.update_portfolio(portfolio.id, {"assets": portfolio.assets})
+            except:
+                pass  # Не показываем ошибки сохранения в сводке
+    except:
+        pass  # Не показываем ошибки обновления в сводке
 
+    # Рассчитываем метрики
+    total_assets = len(portfolio.assets)
+
+    # Подсчитываем общую стоимость на основе текущих цен и количества акций
+    total_value = 0.0
+    invested_value = 0.0
+
+    for asset in portfolio.assets:
+        if asset.current_price and asset.shares:
+            asset_value = asset.current_price * asset.shares
+            total_value += asset_value
+            invested_value += asset_value
+        elif asset.weight and portfolio.initial_value:
+            # Fallback если нет цен/акций
+            asset_value = asset.weight * portfolio.initial_value
+            total_value += asset_value
+            invested_value += asset_value
+
+    remaining_cash = max(0, portfolio.initial_value - invested_value)
+
+    # Отображаем метрики
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Assets", total_assets)
+
+    with col2:
+        st.metric("Total Value", f"${total_value:,.2f}")
+
+    with col3:
+        st.metric("Portfolio Type", portfolio.portfolio_type.value.title())
+
+    with col4:
+        st.metric("Remaining Cash", f"${remaining_cash:,.2f}")
+
+    # Показываем топ активы
+    if portfolio.assets:
+        st.subheader("Top Holdings")
+
+        # Сортируем по весу
+        sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
+        top_assets = sorted_assets[:5]
+
+        for asset in top_assets:
+            col1, col2, col3 = st.columns([3, 1, 1])
+
+            with col1:
+                # Отображаем тикер, название и сектор
+                display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
+                sector_info = f" • {asset.sector}" if asset.sector and asset.sector != "Unknown" else ""
+                st.write(f"**{asset.ticker}** - {display_name}{sector_info}")
+
+            with col2:
+                st.write(f"{asset.weight:.1%}")
+
+            with col3:
+                if hasattr(asset, 'current_price') and asset.current_price:
+                    st.write(f"${asset.current_price:.2f}")
+                else:
+                    st.write("N/A")
+
+
+def show_update_company_info_button(portfolio: Portfolio):
+    """
+    Show update company info button outside of forms
+    """
+    if st.button("🔄 Update Company Info", help="Force update company names and sectors"):
+        force_update_all_company_info(portfolio)
+        st.rerun()
+
+
+def force_update_all_company_info(portfolio: Portfolio):
+    """Force update company information for all assets and save to portfolio"""
+    from .session_state import get_price_manager, get_portfolio_manager
+
+    price_manager = get_price_manager()
+    portfolio_manager = get_portfolio_manager()
+    updated_count = 0
+
+    with st.spinner("Updating all company information..."):
+        for asset in portfolio.assets:
+            try:
+                st.write(f"Fetching info for {asset.ticker}...")
+                company_info = price_manager.get_company_info(asset.ticker)
+
+                if company_info:
+                    old_name = asset.name
+                    old_sector = asset.sector
+
+                    # Update name
+                    asset.name = company_info.name or f"{asset.ticker} Corp"
+
+                    # Update sector
+                    asset.sector = company_info.sector or "Unknown"
+
+                    # Update other info if available
+                    if hasattr(asset, 'industry') and company_info.industry:
+                        asset.industry = company_info.industry
+
+                    if hasattr(asset, 'market_cap') and company_info.market_cap:
+                        asset.market_cap = company_info.market_cap
+
+                    st.success(f"✅ {asset.ticker}: {asset.name} • {asset.sector}")
+                    updated_count += 1
+                else:
+                    # Set defaults
+                    asset.name = f"{asset.ticker} Corp"
+                    asset.sector = "Unknown"
+                    st.warning(f"⚠️ {asset.ticker}: Could not fetch info, using defaults")
+
+            except Exception as e:
+                st.error(f"❌ {asset.ticker}: Error - {str(e)}")
+                asset.name = f"{asset.ticker} Corp"
+                asset.sector = "Unknown"
+
+        # Now save the updated portfolio using the correct method
+        try:
+            portfolio_manager.update_portfolio(portfolio.id, {"assets": portfolio.assets})
+            st.success(f"🎉 Updated and saved information for {updated_count} assets!")
+
+            # Show what sectors were found
+            sectors_found = set(
+                asset.sector for asset in portfolio.assets if asset.sector and asset.sector != "Unknown")
+            if sectors_found:
+                st.info(f"📊 Sectors found: {', '.join(sorted(sectors_found))}")
+
+        except Exception as e:
+            st.error(f"💾 Error saving portfolio: {str(e)}")
+            st.error("Information was updated in memory but not saved to disk")
+
+
+def auto_update_company_info(portfolio: Portfolio) -> bool:
+    """
+    Automatically update company information for portfolio assets without user interaction
+    Returns True if any updates were made
+    """
+    from .session_state import get_price_manager, get_portfolio_manager
+
+    price_manager = get_price_manager()
+    portfolio_manager = get_portfolio_manager()
+    updated_count = 0
+
+    # Only update if most assets are missing info
+    assets_needing_update = [asset for asset in portfolio.assets
+                           if not asset.sector or asset.sector == "Unknown" or not asset.name]
+
+    if len(assets_needing_update) < len(portfolio.assets) * 0.5:
+        # Less than 50% need updates, skip auto-update
+        return False
+
+    try:
+        for asset in assets_needing_update[:5]:  # Limit to 5 to avoid rate limits
+            try:
+                company_info = price_manager.get_company_info(asset.ticker)
+
+                if company_info:
+                    # Update name
+                    if not asset.name or asset.name == f"{asset.ticker} Corp":
+                        asset.name = company_info.name or f"{asset.ticker} Corp"
+
+                    # Update sector
                     if not asset.sector or asset.sector == "Unknown":
                         asset.sector = company_info.sector or "Unknown"
+
+                    updated_count += 1
                 else:
-                    # Set defaults if API fails
+                    # Set defaults
                     if not asset.name:
                         asset.name = f"{asset.ticker} Corp"
                     if not asset.sector:
                         asset.sector = "Unknown"
 
             except Exception:
-                # Set defaults if everything fails
+                # Set defaults if fetch fails
                 if not asset.name:
                     asset.name = f"{asset.ticker} Corp"
                 if not asset.sector:
                     asset.sector = "Unknown"
 
-    # Calculate invested value based on current prices and shares
-    for asset in portfolio.assets:
-        if asset.current_price and asset.shares:
-            invested_value += asset.current_price * asset.shares
-        elif asset.weight and portfolio.initial_value:
-            # Fallback to weight-based calculation
-            invested_value += asset.weight * portfolio.initial_value
-
-    remaining_cash = max(0, portfolio.initial_value - invested_value)
-
-    # Create columns for layout
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("Assets", total_assets)
-
-    with col2:
-        st.metric("Total Value", f"${total_value:,.2f}")
-
-    with col3:
-        st.metric("Portfolio Type", portfolio.portfolio_type.value.title())
-
-    with col4:
-        # Show remaining cash instead of age
-        st.metric("Remaining Cash", f"${remaining_cash:,.2f}")
-
-    # Show asset breakdown
-    if portfolio.assets:
-        st.subheader("Top Holdings")
-
-        # Sort assets by weight
-        sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
-        top_assets = sorted_assets[:5]  # Show top 5
-
-        for asset in top_assets:
-            col1, col2, col3 = st.columns([3, 1, 1])
-
-            with col1:
-                # Display ticker, name, and sector
-                display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
-                sector_info = f" • {asset.sector}" if asset.sector and asset.sector != "Unknown" else ""
-                st.write(f"**{asset.ticker}** - {display_name}{sector_info}")
-
-            with col2:
-                st.write(f"{asset.weight:.1%}")
-
-            with col3:
-                if hasattr(asset, 'current_price') and asset.current_price:
-                    st.write(f"${asset.current_price:.2f}")
-                else:
-                    st.write("N/A")
-
-
-def force_update_company_info(portfolio: Portfolio):
-    """Force update company information for all assets"""
-    from .session_state import get_price_manager, get_portfolio_manager
-
-    price_manager = get_price_manager()
-    updated_count = 0
-
-    with st.spinner("Updating all company information..."):
-        for asset in portfolio.assets:
+        # Save the updated portfolio if we updated anything
+        if updated_count > 0:
             try:
-                company_info = price_manager.get_company_info(asset.ticker)
-                if company_info:
-                    asset.name = company_info.name
-                    asset.sector = company_info.sector or "Unknown"
-                    updated_count += 1
-                else:
-                    # Set defaults
-                    asset.name = f"{asset.ticker} Corp"
-                    asset.sector = "Unknown"
+                portfolio_manager.update_portfolio(portfolio.id, {"assets": portfolio.assets})
+                return True
+            except Exception:
+                pass
 
-            except Exception as e:
-                st.warning(f"Could not fetch info for {asset.ticker}: {e}")
-                asset.name = f"{asset.ticker} Corp"
-                asset.sector = "Unknown"
+    except Exception:
+        pass
 
-        # Save portfolio
-        try:
-            portfolio_manager = get_portfolio_manager()
-            portfolio_manager.save_portfolio(portfolio)
-            st.success(f"✅ Updated and saved information for {updated_count} assets!")
-        except Exception as e:
-            st.error(f"Error saving portfolio: {e}")
-
-    # Create columns for layout
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric("Assets", total_assets)
-
-    with col2:
-        st.metric("Total Value", f"${total_value:,.2f}")
-
-    with col3:
-        st.metric("Portfolio Type", portfolio.portfolio_type.value.title())
-
-    with col4:
-        # Show remaining cash instead of age
-        st.metric("Remaining Cash", f"${remaining_cash:,.2f}")
-
-    # Show asset breakdown
-    if portfolio.assets:
-        st.subheader("Top Holdings")
-
-        # Sort assets by weight
-        sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
-        top_assets = sorted_assets[:5]  # Show top 5
-
-        for asset in top_assets:
-            col1, col2, col3 = st.columns([3, 1, 1])
-
-            with col1:
-                # Display ticker, name, and sector
-                display_name = asset.name if asset.name and asset.name != f"{asset.ticker} Corp" else f"{asset.ticker} Corp"
-                sector_info = f" • {asset.sector}" if asset.sector and asset.sector != "Unknown" else ""
-                st.write(f"**{asset.ticker}** - {display_name}{sector_info}")
-
-            with col2:
-                st.write(f"{asset.weight:.1%}")
-
-            with col3:
-                if hasattr(asset, 'current_price') and asset.current_price:
-                    st.write(f"${asset.current_price:.2f}")
-                else:
-                    st.write("N/A")
-
-
-def force_update_company_info(portfolio: Portfolio):
-    """Force update company information for all assets"""
-    from .session_state import get_price_manager, get_portfolio_manager
-
-    price_manager = get_price_manager()
-    updated_count = 0
-
-    with st.spinner("Updating all company information..."):
-        for asset in portfolio.assets:
-            try:
-                company_info = price_manager.get_company_info(asset.ticker)
-                if company_info:
-                    asset.name = company_info.name
-                    asset.sector = company_info.sector or "Unknown"
-                    updated_count += 1
-                else:
-                    # Set defaults
-                    asset.name = f"{asset.ticker} Corp"
-                    asset.sector = "Unknown"
-
-            except Exception as e:
-                st.warning(f"Could not fetch info for {asset.ticker}: {e}")
-                asset.name = f"{asset.ticker} Corp"
-                asset.sector = "Unknown"
-
-        # Save portfolio
-        try:
-            portfolio_manager = get_portfolio_manager()
-            portfolio_manager.save_portfolio(portfolio)
-            st.success(f"✅ Updated and saved information for {updated_count} assets!")
-        except Exception as e:
-            st.error(f"Error saving portfolio: {e}")
+    return False
 
 
 def update_company_info(portfolio: Portfolio):
@@ -255,7 +336,7 @@ def update_company_info(portfolio: Portfolio):
 
                     # Update sector if not set
                     if not asset.sector or asset.sector == "Unknown":
-                        asset.sector = company_info.sector or "Unknown"
+                        asset.sector = company_info.sector
 
                     # Update industry if available
                     if hasattr(asset, 'industry') and company_info.industry:
@@ -270,20 +351,9 @@ def update_company_info(portfolio: Portfolio):
                         asset.country = company_info.country
 
                     updated_count += 1
-                else:
-                    # Fallback data if API fails
-                    if not asset.name:
-                        asset.name = f"{asset.ticker} Corp"
-                    if not asset.sector:
-                        asset.sector = "Unknown"
 
             except Exception as e:
                 st.warning(f"Could not fetch info for {asset.ticker}: {str(e)}")
-                # Set fallback values
-                if not asset.name:
-                    asset.name = f"{asset.ticker} Corp"
-                if not asset.sector:
-                    asset.sector = "Unknown"
 
         if updated_count > 0:
             st.success(f"Updated company information for {updated_count} assets")
