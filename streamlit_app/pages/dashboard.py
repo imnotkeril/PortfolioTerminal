@@ -23,10 +23,10 @@ from ..utils.formatting import format_currency, format_percentage, format_dateti
 from ..utils.helpers import calculate_portfolio_metrics
 from ..components.tables import render_portfolio_overview_table
 from ..components.charts import (
-    create_portfolio_comparison_chart,
-    create_risk_return_scatter,
     create_portfolio_allocation_chart,
-    create_portfolio_summary_cards
+    create_portfolio_summary_cards,
+    create_risk_return_scatter,
+    create_portfolio_comparison_chart
 )
 
 def render_dashboard():

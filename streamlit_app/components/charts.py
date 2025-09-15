@@ -10,7 +10,8 @@ import pandas as pd
 from typing import List, Dict, Any, Optional, Tuple
 import sys
 from pathlib import Path
-
+import numpy as np
+from plotly.subplots import make_subplots
 # Add core module to path
 current_dir = Path(__file__).parent.parent.parent
 sys.path.append(str(current_dir))
@@ -825,6 +826,8 @@ def render_chart_controls() -> Dict[str, Any]:
     }
 
 
+# Replace the incomplete implementation with this complete one:
+
 def create_portfolio_comparison_chart(portfolios: List[Portfolio]) -> go.Figure:
     """
     Create portfolio comparison chart showing values and allocation.
@@ -833,13 +836,14 @@ def create_portfolio_comparison_chart(portfolios: List[Portfolio]) -> go.Figure:
         portfolios: List of Portfolio objects to compare
 
     Returns:
-        Plotly figure object
+        Plotly figure object showing portfolio comparison
     """
 
     if not portfolios:
+        # Return empty chart
         fig = go.Figure()
         fig.add_annotation(
-            text="No portfolios to compare",
+            text="No portfolios selected for comparison",
             xref="paper", yref="paper",
             x=0.5, y=0.5,
             showarrow=False,
@@ -847,35 +851,135 @@ def create_portfolio_comparison_chart(portfolios: List[Portfolio]) -> go.Figure:
         )
         return fig
 
-    # Portfolio value comparison
+    # Prepare data for comparison
     portfolio_names = [p.name for p in portfolios]
     portfolio_values = [p.calculate_value() for p in portfolios]
+    asset_counts = [len(p.assets) for p in portfolios]
 
-    # Create bar chart for portfolio values
-    fig = go.Figure()
+    # Calculate additional metrics for comparison
+    concentration_risks = []
+    for portfolio in portfolios:
+        if portfolio.assets:
+            sorted_assets = sorted(portfolio.assets, key=lambda x: x.weight, reverse=True)
+            top_3_concentration = sum(asset.weight for asset in sorted_assets[:3])
+            concentration_risks.append(top_3_concentration)
+        else:
+            concentration_risks.append(0)
 
-    fig.add_trace(go.Bar(
-        x=portfolio_names,
-        y=portfolio_values,
-        text=[format_currency(val) for val in portfolio_values],
-        textposition='auto',
-        name='Portfolio Value',
-        marker_color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd'][:len(portfolios)],
-        hovertemplate="<b>%{x}</b><br>" +
-                      "Value: %{y:$,.0f}<br>" +
-                      "<extra></extra>"
-    ))
+    # Create subplot with secondary y-axis
+    from plotly.subplots import make_subplots
 
+    fig = make_subplots(
+        rows=2, cols=2,
+        subplot_titles=('Portfolio Values', 'Asset Count Comparison',
+                        'Top 3 Concentration Risk', 'Asset Allocation Overview'),
+        specs=[[{"secondary_y": False}, {"secondary_y": False}],
+               [{"secondary_y": False}, {"type": "pie"}]],
+        vertical_spacing=0.12,
+        horizontal_spacing=0.1
+    )
+
+    # 1. Portfolio Values Bar Chart
+    fig.add_trace(
+        go.Bar(
+            x=portfolio_names,
+            y=portfolio_values,
+            name='Portfolio Value',
+            text=[format_currency(val) for val in portfolio_values],
+            textposition='auto',
+            marker_color='#1f77b4',
+            hovertemplate="<b>%{x}</b><br>" +
+                          "Value: %{text}<br>" +
+                          "<extra></extra>"
+        ),
+        row=1, col=1
+    )
+
+    # 2. Asset Count Comparison
+    fig.add_trace(
+        go.Bar(
+            x=portfolio_names,
+            y=asset_counts,
+            name='Asset Count',
+            text=asset_counts,
+            textposition='auto',
+            marker_color='#ff7f0e',
+            hovertemplate="<b>%{x}</b><br>" +
+                          "Assets: %{y}<br>" +
+                          "<extra></extra>"
+        ),
+        row=1, col=2
+    )
+
+    # 3. Concentration Risk Comparison
+    fig.add_trace(
+        go.Bar(
+            x=portfolio_names,
+            y=[risk * 100 for risk in concentration_risks],
+            name='Top 3 Concentration %',
+            text=[f"{risk:.1%}" for risk in concentration_risks],
+            textposition='auto',
+            marker_color='#2ca02c',
+            hovertemplate="<b>%{x}</b><br>" +
+                          "Top 3 Concentration: %{text}<br>" +
+                          "<extra></extra>"
+        ),
+        row=2, col=1
+    )
+
+    # 4. Combined Asset Allocation Pie Chart
+    # Aggregate all assets across selected portfolios
+    combined_assets = {}
+    total_combined_value = sum(portfolio_values)
+
+    for portfolio in portfolios:
+        portfolio_value = portfolio.calculate_value()
+        for asset in portfolio.assets:
+            if asset.ticker not in combined_assets:
+                combined_assets[asset.ticker] = 0
+            # Weight by portfolio value in the comparison
+            combined_assets[asset.ticker] += asset.weight * (
+                        portfolio_value / total_combined_value) if total_combined_value > 0 else 0
+
+    # Sort by weight and take top 10 for readability
+    sorted_combined = sorted(combined_assets.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    if sorted_combined:
+        asset_tickers, asset_weights = zip(*sorted_combined)
+
+        fig.add_trace(
+            go.Pie(
+                labels=asset_tickers,
+                values=asset_weights,
+                name="Combined Allocation",
+                textinfo="label+percent",
+                hovertemplate="<b>%{label}</b><br>" +
+                              "Combined Weight: %{percent}<br>" +
+                              "<extra></extra>",
+                hole=0.4  # Make it a donut chart
+            ),
+            row=2, col=2
+        )
+
+    # Update layout
     fig.update_layout(
-        title="Portfolio Values Comparison",
-        xaxis_title="Portfolio",
-        yaxis_title="Value ($)",
-        height=400,
+        title=f"Portfolio Comparison Dashboard ({len(portfolios)} portfolios)",
+        height=700,
         showlegend=False,
         font=dict(family="Arial", size=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)"
     )
+
+    # Update y-axis labels
+    fig.update_yaxes(title_text="Value ($)", row=1, col=1)
+    fig.update_yaxes(title_text="Number of Assets", row=1, col=2)
+    fig.update_yaxes(title_text="Concentration (%)", row=2, col=1)
+
+    # Update x-axis labels
+    fig.update_xaxes(title_text="Portfolios", row=1, col=1)
+    fig.update_xaxes(title_text="Portfolios", row=1, col=2)
+    fig.update_xaxes(title_text="Portfolios", row=2, col=1)
 
     return fig
 
