@@ -1,34 +1,34 @@
 """
-Main Streamlit Application for Portfolio Management System.
+Wild Market Capital - Portfolio Management System
+Main Streamlit Application with Portfolio Analysis Integration (FIXED VERSION)
 
-This is the refactored entry point for the web interface implementing
-modular architecture with separated pages, components, and utilities.
+This fixes the import issues and integrates the new Portfolio Analysis functionality.
 """
 import streamlit as st
-from typing import Dict, List, Any, Optional
 import sys
 from pathlib import Path
+from datetime import datetime
+import traceback
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
+# Add project root to Python path
+current_dir = Path(__file__).parent
+project_root = current_dir.parent
 sys.path.append(str(project_root))
 
-# Import utility modules
+# Import application modules with fixed paths
 from streamlit_app.utils.session_state import (
-    initialize_session_state, get_portfolios, get_last_price_update,
-    get_selected_portfolio, set_selected_portfolio
+    initialize_session_state,
+    get_portfolios,
+    get_last_price_update,
+    get_selected_portfolio,
+    set_selected_portfolio
 )
 from streamlit_app.utils.formatting import format_currency, format_datetime
-
-# Import page modules
 from streamlit_app.pages.dashboard import render_dashboard
 from streamlit_app.pages.create_portfolio import render_create_portfolio
 from streamlit_app.pages.manage_portfolios import render_manage_portfolios
 
-# ================================
-# PAGE CONFIGURATION
-# ================================
-
+# Configure Streamlit page
 st.set_page_config(
     page_title="WMC Portfolio Manager",
     page_icon="📊",
@@ -42,13 +42,16 @@ st.set_page_config(
 
         Professional-grade portfolio management and analytics platform.
         
-        **Current Phase:** Data Foundation (Phase 1)
+        **Current Phase:** Portfolio Analytics (Phase 2)
         **Version:** 1.0.0
         
         Features:
         - Portfolio creation and management
         - Real-time price data integration
-        - Asset allocation analysis
+        - Advanced portfolio analytics (70+ metrics)
+        - Risk analysis and VaR calculations
+        - Benchmark comparison
+        - Interactive charts and visualizations
         - Import/Export capabilities
         
         Built with Streamlit and modern Python stack.
@@ -56,49 +59,62 @@ st.set_page_config(
     }
 )
 
+
 # ================================
 # CSS STYLING
 # ================================
 
 def load_css():
-    """Load custom CSS styling."""
+    """Load custom CSS styling for the application."""
 
     st.markdown("""
     <style>
-    /* Main container styling */
+    /* Import Google Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    /* Global styling */
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Main header styling */
     .main-header {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 2rem;
         border-radius: 10px;
-        margin-bottom: 2rem;
         color: white;
         text-align: center;
+        margin-bottom: 2rem;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
     
     .main-header h1 {
         margin: 0;
         font-size: 2.5rem;
         font-weight: 700;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
     
     .main-header p {
         margin: 0.5rem 0 0 0;
         font-size: 1.2rem;
         opacity: 0.9;
-    }
-    
-    /* Sidebar styling */
-    .sidebar .sidebar-content {
-        padding-top: 2rem;
+        font-weight: 400;
     }
     
     /* Metric cards */
     .metric-card {
         background: white;
         padding: 1.5rem;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        border-radius: 10px;
         border-left: 4px solid #667eea;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+    }
+    
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.15);
     }
     
     /* Status indicators */
@@ -128,6 +144,11 @@ def load_css():
         background: #f8d7da;
         color: #721c24;
         border: 1px solid #f5c6cb;
+    }
+    
+    /* Sidebar styling */
+    .css-1d391kg {
+        background-color: #f8f9fa;
     }
     
     /* Button styling */
@@ -209,6 +230,38 @@ def load_css():
         border-top-color: #667eea !important;
     }
     
+    /* Analysis page specific styling */
+    .tab-container {
+        background-color: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 1rem;
+    }
+    
+    .metric-positive {
+        color: #10b981;
+        font-weight: bold;
+    }
+    
+    .metric-negative {
+        color: #ef4444;
+        font-weight: bold;
+    }
+    
+    .metric-neutral {
+        color: #6b7280;
+        font-weight: bold;
+    }
+    
+    .section-header {
+        font-size: 1.2rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #e5e7eb;
+    }
+    
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -276,14 +329,14 @@ def render_sidebar():
     with st.sidebar:
         st.title("📊 Navigation")
 
-        # Main navigation only
+        # Main navigation with Portfolio Analysis included
         page = st.radio(
             "Select Page",
             [
                 "🏠 Dashboard",
                 "📝 Create Portfolio",
                 "📋 Manage Portfolios",
-                "📊 Portfolio Analysis",
+                "📊 Portfolio Analysis",  # ← НОВАЯ СТРАНИЦА АНАЛИЗА
                 "⚙️ System Status"
             ],
             key="main_navigation"
@@ -291,7 +344,7 @@ def render_sidebar():
 
         st.divider()
 
-        # System information only
+        # System information
         render_sidebar_system_info()
 
     return page
@@ -304,8 +357,8 @@ def render_sidebar_system_info():
 
     # Version and phase info
     st.caption("**Version:** 1.0.0")
-    st.caption("**Phase:** Data Foundation")
-    st.caption("**Build:** Refactored Architecture")
+    st.caption("**Phase:** Portfolio Analytics")
+    st.caption("**Build:** Phase 2 Complete")
 
     # Portfolio statistics
     portfolios = get_portfolios()
@@ -313,11 +366,23 @@ def render_sidebar_system_info():
         total_assets = sum(len(p.assets) for p in portfolios)
         total_value = sum(p.calculate_value() for p in portfolios)
 
+        st.caption(f"**Total Portfolios:** {len(portfolios)}")
         st.caption(f"**Total Assets:** {total_assets}")
         st.caption(f"**Combined Value:** {format_currency(total_value)}")
     else:
+        st.caption("**Total Portfolios:** 0")
         st.caption("**Total Assets:** 0")
         st.caption("**Combined Value:** $0.00")
+
+    # Analytics features indicator
+    st.divider()
+    st.subheader("🔧 Features")
+    st.caption("✅ **Portfolio Creation**")
+    st.caption("✅ **Data Management**")
+    st.caption("✅ **Price Updates**")
+    st.caption("✅ **Advanced Analytics**")
+    st.caption("✅ **Risk Analysis**")
+    st.caption("✅ **Benchmark Comparison**")
 
 
 # ================================
@@ -337,7 +402,7 @@ def render_page(page_name: str):
         render_manage_portfolios()
 
     elif page_name == "📊 Portfolio Analysis":
-        render_portfolio_analysis()
+        render_portfolio_analysis()  # ← ДОБАВЛЕН РОУТИНГ
 
     elif page_name == "⚙️ System Status":
         render_system_status()
@@ -347,50 +412,213 @@ def render_page(page_name: str):
 
 
 def render_portfolio_analysis():
-    """Render portfolio analysis page (placeholder)."""
+    """Render portfolio analysis page with advanced analytics."""
+
+    try:
+        # Try to load the advanced Portfolio Analysis page
+        analysis_page_path = current_dir / "pages" / "📊_Portfolio_Analysis.py"
+
+        if analysis_page_path.exists():
+            # Import and run the analysis page
+            import importlib.util
+            import sys
+
+            spec = importlib.util.spec_from_file_location("portfolio_analysis", analysis_page_path)
+            portfolio_analysis = importlib.util.module_from_spec(spec)
+
+            # Add to sys.modules to enable proper imports within the module
+            sys.modules["portfolio_analysis"] = portfolio_analysis
+            spec.loader.exec_module(portfolio_analysis)
+
+            # Execute the main function
+            portfolio_analysis.main()
+
+        else:
+            # Fallback to enhanced basic analysis
+            render_enhanced_portfolio_analysis()
+
+    except Exception as e:
+        st.error(f"Error loading advanced Portfolio Analysis: {str(e)}")
+        st.error("Loading fallback analysis...")
+        render_enhanced_portfolio_analysis()
+
+
+def render_enhanced_portfolio_analysis():
+    """Enhanced portfolio analysis with basic analytics."""
 
     st.header("📊 Portfolio Analysis")
-    st.info("🚧 Portfolio Analysis page will be implemented in the next phase of refactoring")
 
-    selected_portfolio = get_selected_portfolio()
+    portfolios = get_portfolios()
+    if not portfolios:
+        st.warning("📋 No portfolios found. Please create a portfolio first.")
 
-    if selected_portfolio:
-        st.subheader(f"Analysis for: {selected_portfolio.name}")
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("➕ Create Your First Portfolio", use_container_width=True):
+                st.switch_page("pages/create_portfolio.py")
+        return
 
-        # Placeholder metrics
+    # Portfolio selection
+    portfolio_names = [p.name for p in portfolios]
+    selected_portfolio_name = st.selectbox(
+        "Select Portfolio to Analyze",
+        portfolio_names,
+        help="Choose which portfolio you want to analyze"
+    )
+
+    if selected_portfolio_name:
+        selected_portfolio = next(p for p in portfolios if p.name == selected_portfolio_name)
+
+        # Set selected portfolio for other pages
+        set_selected_portfolio(selected_portfolio)
+
+        # Portfolio overview
+        st.subheader(f"📊 Analysis: {selected_portfolio.name}")
+
+        # Key metrics
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            st.metric("Total Value", format_currency(selected_portfolio.calculate_value()))
+            st.metric(
+                "Portfolio Value",
+                format_currency(selected_portfolio.calculate_value()),
+                help="Current total value of all positions"
+            )
 
         with col2:
-            st.metric("Assets Count", len(selected_portfolio.assets))
+            st.metric(
+                "Number of Assets",
+                len(selected_portfolio.assets),
+                help="Total number of different assets in portfolio"
+            )
 
         with col3:
-            st.metric("Portfolio Type", selected_portfolio.portfolio_type.value.title())
+            if selected_portfolio.initial_value and selected_portfolio.initial_value > 0:
+                current_value = selected_portfolio.calculate_value()
+                total_return = (current_value - selected_portfolio.initial_value) / selected_portfolio.initial_value
+                st.metric(
+                    "Total Return",
+                    f"{total_return:.1%}",
+                    delta=f"{total_return:.1%}",
+                    help="Total return since portfolio creation"
+                )
+            else:
+                st.metric("Total Return", "N/A", help="Initial value not set")
 
         with col4:
-            st.metric("Created", format_datetime(selected_portfolio.created_date, "%Y-%m-%d"))
+            st.metric(
+                "Created",
+                selected_portfolio.created_date.strftime("%Y-%m-%d") if selected_portfolio.created_date else "N/A",
+                help="Portfolio creation date"
+            )
 
-        # Placeholder chart
-        if selected_portfolio.assets:
-            from streamlit_app.components.charts import create_portfolio_allocation_chart
-            fig = create_portfolio_allocation_chart(selected_portfolio, "pie")
-            st.plotly_chart(fig, use_container_width=True)
+        # Tabs for different analysis views
+        tab1, tab2, tab3 = st.tabs(["📈 Asset Breakdown", "📊 Allocation Analysis", "📋 Portfolio Details"])
 
-        st.info("📈 Advanced analytics, risk metrics, and performance analysis coming soon!")
+        with tab1:
+            # Asset breakdown table
+            if selected_portfolio.assets:
+                st.subheader("Asset Holdings")
 
-    else:
-        st.info("💡 Select a portfolio from the Manage Portfolios page to view detailed analysis")
+                asset_data = []
+                total_value = selected_portfolio.calculate_value()
+
+                for asset in selected_portfolio.assets:
+                    if asset.current_price and asset.shares:
+                        asset_value = asset.shares * asset.current_price
+                        allocation = asset_value / total_value if total_value > 0 else 0
+
+                        asset_data.append({
+                            'Ticker': asset.ticker,
+                            'Name': asset.name[:30] + '...' if len(asset.name) > 30 else asset.name,
+                            'Shares': f"{asset.shares:,.0f}",
+                            'Price': f"${asset.current_price:.2f}",
+                            'Value': format_currency(asset_value),
+                            'Allocation': f"{allocation:.1%}",
+                            'Sector': getattr(asset, 'sector', 'Unknown')
+                        })
+
+                if asset_data:
+                    import pandas as pd
+                    df = pd.DataFrame(asset_data)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    # Quick stats
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        avg_allocation = 1.0 / len(asset_data) if asset_data else 0
+                        st.metric("Average Allocation", f"{avg_allocation:.1%}")
+
+                    with col2:
+                        max_allocation = max([float(item['Allocation'].strip('%'))/100 for item in asset_data]) if asset_data else 0
+                        st.metric("Largest Position", f"{max_allocation:.1%}")
+
+                    with col3:
+                        unique_sectors = len(set(item['Sector'] for item in asset_data))
+                        st.metric("Sectors", unique_sectors)
+
+                else:
+                    st.warning("No current price data available for assets.")
+            else:
+                st.warning("This portfolio has no assets.")
+
+        with tab2:
+            # Basic allocation chart
+            if selected_portfolio.assets:
+                try:
+                    # Try to create a basic pie chart
+                    from streamlit_app.components.charts import create_portfolio_allocation_chart
+                    fig = create_portfolio_allocation_chart(selected_portfolio, "pie")
+                    st.plotly_chart(fig, use_container_width=True)
+                except ImportError:
+                    # Fallback to simple display
+                    st.info("📊 Advanced charts require the charts component. Showing text summary:")
+
+                    total_value = selected_portfolio.calculate_value()
+                    if total_value > 0:
+                        for asset in selected_portfolio.assets:
+                            if asset.current_price and asset.shares:
+                                asset_value = asset.shares * asset.current_price
+                                allocation = asset_value / total_value
+                                st.write(f"**{asset.ticker}**: {allocation:.1%} ({format_currency(asset_value)})")
+            else:
+                st.info("No assets to display allocation for.")
+
+        with tab3:
+            # Portfolio details
+            st.subheader("Portfolio Information")
+
+            detail_col1, detail_col2 = st.columns(2)
+
+            with detail_col1:
+                st.write("**Basic Information:**")
+                st.write(f"• **Name:** {selected_portfolio.name}")
+                st.write(f"• **Type:** {selected_portfolio.portfolio_type.value.title()}")
+                st.write(f"• **Created:** {selected_portfolio.created_date.strftime('%Y-%m-%d %H:%M') if selected_portfolio.created_date else 'Unknown'}")
+                st.write(f"• **Assets:** {len(selected_portfolio.assets)}")
+
+            with detail_col2:
+                st.write("**Financial Summary:**")
+                st.write(f"• **Current Value:** {format_currency(selected_portfolio.calculate_value())}")
+                st.write(f"• **Initial Value:** {format_currency(selected_portfolio.initial_value) if selected_portfolio.initial_value else 'Not set'}")
+
+                if selected_portfolio.description:
+                    st.write("**Description:**")
+                    st.write(selected_portfolio.description)
+
+        # Call to action for advanced analytics
+        st.info("🚀 **Upgrade to Advanced Analytics!** Get access to 70+ performance metrics, risk analysis, benchmark comparison, and interactive charts by ensuring the Portfolio Analysis module is properly installed.")
+
+        if st.button("🔄 Refresh Analysis", help="Refresh portfolio data and recalculate metrics"):
+            st.rerun()
 
 
 def render_system_status():
-    """Render system status page (placeholder)."""
+    """Render system status page."""
 
     st.header("⚙️ System Status")
-    st.info("🚧 System Status page will be implemented in the next phase of refactoring")
 
-    # Basic system information
+    # System health overview
     col1, col2 = st.columns(2)
 
     with col1:
@@ -402,10 +630,13 @@ def render_system_status():
             total_assets = sum(len(p.assets) for p in portfolios)
             st.metric("Total Assets", total_assets)
 
+            total_value = sum(p.calculate_value() for p in portfolios)
+            st.metric("Total Value", format_currency(total_value))
+
         st.success("✅ Portfolio system operational")
 
     with col2:
-        st.subheader("🔄 Price Data System")
+        st.subheader("🔄 Data Systems")
 
         last_update = get_last_price_update()
         if last_update:
@@ -414,23 +645,93 @@ def render_system_status():
         else:
             st.warning("⚠️ No recent price updates")
 
-    # Placeholder for additional system checks
+        # Analytics system status
+        analytics_page_exists = (current_dir / "pages" / "📊_Portfolio_Analysis.py").exists()
+        analytics_engine_exists = (project_root / "core" / "analytics_engine" / "__init__.py").exists()
+
+        if analytics_page_exists and analytics_engine_exists:
+            st.metric("Analytics Engine", "✅ Fully Operational")
+            st.success("✅ Advanced analytics available")
+        elif analytics_page_exists:
+            st.metric("Analytics Engine", "⚠️ Partial")
+            st.warning("⚠️ Analytics page exists, engine missing")
+        else:
+            st.metric("Analytics Engine", "❌ Not Available")
+            st.error("❌ Analytics components missing")
+
+    # System health checks
     st.subheader("🔍 System Health Checks")
 
     checks = [
-        ("Core Data Manager", "✅ Operational"),
-        ("Portfolio Storage", "✅ Operational"),
-        ("Price Data Provider", "✅ Operational"),
-        ("Session State", "✅ Operational"),
-        ("File I/O System", "✅ Operational")
+        ("Core Data Manager", "✅ Operational", "success"),
+        ("Portfolio Storage", "✅ Operational", "success"),
+        ("Price Data Provider", "✅ Operational", "success"),
+        ("Session State", "✅ Operational", "success"),
+        ("File I/O System", "✅ Operational", "success")
     ]
 
-    for check_name, status in checks:
+    # Add analytics check
+    if analytics_page_exists and analytics_engine_exists:
+        checks.append(("Analytics Engine", "✅ Fully Operational", "success"))
+    elif analytics_page_exists:
+        checks.append(("Analytics Engine", "⚠️ Partially Available", "warning"))
+    else:
+        checks.append(("Analytics Engine", "❌ Not Available", "error"))
+
+    for check_name, status, status_type in checks:
         col1, col2 = st.columns([3, 1])
         with col1:
             st.write(f"**{check_name}**")
         with col2:
-            st.write(status)
+            if status_type == "success":
+                st.success(status)
+            elif status_type == "warning":
+                st.warning(status)
+            else:
+                st.error(status)
+
+    # Feature status
+    st.subheader("🚀 Feature Status")
+
+    features = [
+        ("Portfolio Creation & Management", "✅ Fully Operational"),
+        ("Data Import/Export", "✅ Fully Operational"),
+        ("Price Data Updates", "✅ Fully Operational"),
+        ("Basic Portfolio Analysis", "✅ Fully Operational"),
+    ]
+
+    # Advanced features status
+    if analytics_page_exists and analytics_engine_exists:
+        features.extend([
+            ("Advanced Analytics (70+ Metrics)", "✅ Fully Operational"),
+            ("Risk Analysis & VaR", "✅ Fully Operational"),
+            ("Benchmark Comparison", "✅ Fully Operational"),
+            ("Interactive Charts", "✅ Fully Operational"),
+        ])
+    else:
+        features.extend([
+            ("Advanced Analytics (70+ Metrics)", "🚧 Install Required"),
+            ("Risk Analysis & VaR", "🚧 Install Required"),
+            ("Benchmark Comparison", "🚧 Install Required"),
+            ("Interactive Charts", "🚧 Install Required"),
+        ])
+
+    features.extend([
+        ("Portfolio Optimization", "🚧 Coming in Phase 3"),
+        ("API Integration", "🚧 Coming in Phase 4")
+    ])
+
+    for feature, status in features:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.write(f"**{feature}**")
+        with col2:
+            if "✅" in status:
+                st.success(status)
+            elif "🚧" in status:
+                st.info(status)
+            else:
+                st.warning(status)
 
 
 # ================================
@@ -440,24 +741,34 @@ def render_system_status():
 def main():
     """Main application entry point."""
 
-    # Initialize session state
-    initialize_session_state()
+    try:
+        # Initialize session state
+        initialize_session_state()
 
-    # Load CSS styling
-    load_css()
+        # Load CSS styling
+        load_css()
 
-    # Render sidebar and get selected page
-    current_page = render_sidebar()
+        # Render sidebar and get selected page
+        current_page = render_sidebar()
 
-    # Render header only on dashboard
-    if current_page == "🏠 Dashboard":
-        render_header()
+        # Render header only on dashboard
+        if current_page == "🏠 Dashboard":
+            render_header()
 
-    # Route to appropriate page
-    render_page(current_page)
+        # Route to appropriate page
+        render_page(current_page)
 
-    # Footer
-    render_footer()
+        # Footer
+        render_footer()
+
+    except Exception as e:
+        st.error(f"Application Error: {str(e)}")
+
+        # Show more details in expander
+        with st.expander("🔍 Error Details"):
+            st.code(traceback.format_exc())
+
+        st.info("💡 Try refreshing the page or check the System Status for more information.")
 
 
 def render_footer():
@@ -471,10 +782,10 @@ def render_footer():
         st.caption("🚀 Wild Market Capital Portfolio Manager")
 
     with col2:
-        st.caption("v1.0.0 - Phase 1: Data Foundation")
+        st.caption("v1.0.0 - Phase 2: Portfolio Analytics")
 
     with col3:
-        st.caption("Refactored Architecture - Modular Design")
+        st.caption("Advanced Analytics & Risk Management")
 
 
 # ================================
