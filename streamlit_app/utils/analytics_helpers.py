@@ -147,11 +147,11 @@ def generate_risk_alerts(analysis_results: Dict, thresholds: Dict = None) -> Lis
     """
     if thresholds is None:
         thresholds = {
-            'max_drawdown': -0.20,  # Alert if max drawdown > 20%
-            'var_95': -0.05,  # Alert if daily VaR > 5%
-            'volatility': 0.30,  # Alert if volatility > 30%
-            'sharpe_ratio': 0.5,  # Alert if Sharpe < 0.5
-            'consecutive_losses': 10  # Alert if > 10 consecutive loss days
+            'max_drawdown': -0.20,      # Alert if max drawdown > 20%
+            'var_95': -0.05,            # Alert if daily VaR > 5%
+            'volatility': 0.30,         # Alert if volatility > 30%
+            'sharpe_ratio': 0.5,        # Alert if Sharpe < 0.5
+            'consecutive_losses': 10     # Alert if > 10 consecutive loss days
         }
 
     alerts = []
@@ -204,9 +204,9 @@ def calculate_correlation_matrix(returns_data: pd.DataFrame) -> pd.DataFrame:
 
 
 def calculate_rolling_correlation(
-        portfolio_returns: pd.Series,
-        benchmark_returns: pd.Series,
-        window: int = 252
+    portfolio_returns: pd.Series,
+    benchmark_returns: pd.Series,
+    window: int = 252
 ) -> pd.Series:
     """
     Calculate rolling correlation between portfolio and benchmark.
@@ -314,7 +314,7 @@ def calculate_concentration_metrics(portfolio) -> Dict[str, float]:
     weights = calculate_portfolio_weights(portfolio, method='market_value')
 
     # Herfindahl-Hirschman Index (HHI)
-    hhi = sum(w ** 2 for w in weights)
+    hhi = sum(w**2 for w in weights)
 
     # Effective number of assets
     effective_assets = 1 / hhi if hhi > 0 else 0
@@ -337,7 +337,7 @@ def calculate_concentration_metrics(portfolio) -> Dict[str, float]:
 
 def detect_outliers(returns: pd.Series, method: str = 'zscore', threshold: float = 3.0) -> pd.Series:
     """
-    Detect outliers in returns series.
+    Detect outliers in returns series - simplified to avoid scipy.
 
     Args:
         returns: Returns series
@@ -348,8 +348,14 @@ def detect_outliers(returns: pd.Series, method: str = 'zscore', threshold: float
         Boolean series indicating outliers
     """
     if method == 'zscore':
-        z_scores = np.abs(stats.zscore(returns.dropna()))
-        outliers = pd.Series(z_scores > threshold, index=returns.dropna().index)
+        # Simple z-score calculation without scipy
+        mean_ret = returns.mean()
+        std_ret = returns.std()
+        if std_ret != 0:
+            z_scores = np.abs((returns - mean_ret) / std_ret)
+            outliers = pd.Series(z_scores > threshold, index=returns.index)
+        else:
+            outliers = pd.Series(False, index=returns.index)
 
     elif method == 'iqr':
         Q1 = returns.quantile(0.25)
@@ -402,9 +408,9 @@ def calculate_regime_indicators(returns: pd.Series, lookback: int = 252) -> pd.D
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def fetch_and_process_benchmark_data(
-        benchmark_ticker: str,
-        start_date: datetime,
-        end_date: datetime
+    benchmark_ticker: str,
+    start_date: datetime,
+    end_date: datetime
 ) -> Optional[pd.Series]:
     """
     Fetch and process benchmark data with caching.
@@ -443,9 +449,9 @@ def fetch_and_process_benchmark_data(
 
 
 def create_performance_attribution_data(
-        portfolio_returns: pd.Series,
-        asset_returns: pd.DataFrame,
-        weights: np.ndarray
+    portfolio_returns: pd.Series,
+    asset_returns: pd.DataFrame,
+    weights: np.ndarray
 ) -> Dict[str, Dict[str, float]]:
     """
     Create performance attribution data.
@@ -476,7 +482,7 @@ def create_performance_attribution_data(
 
 def calculate_style_analysis(portfolio_returns: pd.Series, factor_returns: pd.DataFrame) -> Dict[str, float]:
     """
-    Perform style analysis using factor returns.
+    Perform style analysis using factor returns - simplified to avoid scipy.
 
     Args:
         portfolio_returns: Portfolio returns series
@@ -486,44 +492,24 @@ def calculate_style_analysis(portfolio_returns: pd.Series, factor_returns: pd.Da
         Dictionary with factor loadings
     """
     try:
-        from scipy.optimize import minimize
+        # Simplified version without scipy optimization
+        # Just calculate correlations as factor loadings approximation
 
         # Align data
         common_dates = portfolio_returns.index.intersection(factor_returns.index)
         if len(common_dates) < 30:  # Need sufficient data
             return {}
 
-        y = portfolio_returns.loc[common_dates].values
-        X = factor_returns.loc[common_dates].values
+        y = portfolio_returns.loc[common_dates]
+        X = factor_returns.loc[common_dates]
 
-        # Objective function for style analysis (minimize tracking error)
-        def objective(weights):
-            predicted = X.dot(weights)
-            return np.sum((y - predicted) ** 2)
+        # Simple correlation-based factor loadings
+        factor_loadings = {}
+        for factor in X.columns:
+            correlation = y.corr(X[factor])
+            factor_loadings[factor] = correlation if not np.isnan(correlation) else 0.0
 
-        # Constraints: weights sum to 1, all non-negative
-        constraints = [
-            {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-        ]
-        bounds = [(0, 1) for _ in range(X.shape[1])]
-
-        # Initial guess
-        initial_weights = np.ones(X.shape[1]) / X.shape[1]
-
-        # Optimize
-        result = minimize(
-            objective,
-            initial_weights,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints
-        )
-
-        if result.success:
-            factor_loadings = dict(zip(factor_returns.columns, result.x))
-            return factor_loadings
-        else:
-            return {}
+        return factor_loadings
 
     except Exception:
         return {}
@@ -598,11 +584,9 @@ def generate_portfolio_insights(analysis_results: Dict, portfolio_name: str) -> 
     # Distribution insights
     skewness = risk['skewness']
     if skewness > 0.5:
-        insights.append(
-            f"📈 Positive skewness ({skewness:.2f}) suggests more frequent small losses, occasional large gains")
+        insights.append(f"📈 Positive skewness ({skewness:.2f}) suggests more frequent small losses, occasional large gains")
     elif skewness < -0.5:
-        insights.append(
-            f"📉 Negative skewness ({skewness:.2f}) suggests more frequent small gains, occasional large losses")
+        insights.append(f"📉 Negative skewness ({skewness:.2f}) suggests more frequent small gains, occasional large losses")
 
     # Kurtosis insights
     kurtosis = risk['kurtosis']
@@ -649,8 +633,7 @@ def calculate_portfolio_efficiency_metrics(analysis_results: Dict) -> Dict[str, 
     return_to_risk = perf['annualized_return'] / risk['volatility'] if risk['volatility'] != 0 else 0
 
     # Return per unit of downside risk
-    return_to_downside = perf['annualized_return'] / risk['downside_deviation'] if risk[
-                                                                                       'downside_deviation'] != 0 else 0
+    return_to_downside = perf['annualized_return'] / risk['downside_deviation'] if risk['downside_deviation'] != 0 else 0
 
     # Return per unit of maximum drawdown
     return_to_mdd = perf['annualized_return'] / abs(risk['max_drawdown']) if risk['max_drawdown'] != 0 else 0
@@ -798,13 +781,9 @@ def export_analysis_to_excel(analysis_results: Dict, portfolio_name: str) -> byt
         if 'benchmark_comparison' in analysis_results:
             bench_summary = analysis_results['benchmark_comparison']['summary']
             bench_df = pd.DataFrame([
-                ['Portfolio', bench_summary['Portfolio']['total_return'],
-                 bench_summary['Portfolio']['annualized_return'], bench_summary['Portfolio']['volatility']],
-                ['Benchmark', bench_summary['Benchmark']['total_return'],
-                 bench_summary['Benchmark']['annualized_return'], bench_summary['Benchmark']['volatility']],
-                ['Difference', bench_summary['outperformance']['annualized_excess_return'],
-                 bench_summary['outperformance']['annualized_excess_return'],
-                 bench_summary['outperformance']['excess_volatility']]
+                ['Portfolio', bench_summary['Portfolio']['total_return'], bench_summary['Portfolio']['annualized_return'], bench_summary['Portfolio']['volatility']],
+                ['Benchmark', bench_summary['Benchmark']['total_return'], bench_summary['Benchmark']['annualized_return'], bench_summary['Benchmark']['volatility']],
+                ['Difference', bench_summary['outperformance']['annualized_excess_return'], bench_summary['outperformance']['annualized_excess_return'], bench_summary['outperformance']['excess_volatility']]
             ], columns=['Type', 'Total Return', 'Annualized Return', 'Volatility'])
             bench_df.to_excel(writer, sheet_name='Benchmark_Comparison', index=False)
 
